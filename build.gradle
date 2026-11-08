@@ -106,6 +106,13 @@ neoForge {
 
 dependencies {
     compileOnly files(dynamicVehiclesJar).builtBy(tasks.named("downloadDynamicVehicles"))
+    // Required so much as compiling against it: every `run` config (including gameTestServer)
+    // needs it on the runtime classpath too, or classloading/verification of
+    // dispatcher/ContractHudOverlay and dispatcher/ContractWaypointOverlay (which import its
+    // hud.* classes) fails -- dynamic-vehicles' own build.gradle documents this exact failure
+    // mode for its own required/optional external jars ("no production GameTest runs"). Still
+    // not bundled into this mod's own shipped jar (runtimeOnly, not implementation).
+    runtimeOnly files(dynamicVehiclesJar).builtBy(tasks.named("downloadDynamicVehicles"))
     testImplementation platform("org.junit:junit-bom:5.11.4")
     testImplementation "org.junit.jupiter:junit-jupiter"
     testRuntimeOnly "org.junit.platform:junit-platform-launcher"
