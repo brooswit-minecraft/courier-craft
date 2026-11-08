@@ -21,6 +21,33 @@ sourceSets.main.resources {
     exclude("src/generated/**/.cache")
 }
 
+repositories {
+    // dynamic-vehicles is not on a maven repository; fetched from its GitHub release, pinned by
+    // version and verified by sha512, same pattern dynamic-vehicles itself uses for dynamic-terrain.
+    // compileOnly below, never bundled or required at runtime -- Courier Craft runs standalone;
+    // see neoforge.mods.toml's optional dependency and the ModList-guarded call sites.
+    mavenCentral()
+}
+
+def dynamicVehiclesJar = layout.buildDirectory.file("dynamicvehicles/dynamicvehicles-${project.dynamicvehicles_version}.jar")
+def dynamicVehiclesVersion = project.dynamicvehicles_version
+def dynamicVehiclesSha512 = project.dynamicvehicles_sha512
+tasks.register("downloadDynamicVehicles") {
+    outputs.file(dynamicVehiclesJar)
+    doLast {
+        def target = dynamicVehiclesJar.get().asFile
+        target.parentFile.mkdirs()
+        def url = "https://github.com/brooswit-minecraft/dynamic-vehicles/releases/download/v${dynamicVehiclesVersion}/dynamicvehicles-${dynamicVehiclesVersion}.jar"
+        new URL(url).withInputStream { input -> target.withOutputStream { it << input } }
+        def digest = java.security.MessageDigest.getInstance("SHA-512")
+        def actual = digest.digest(target.bytes).encodeHex().toString()
+        if (actual != dynamicVehiclesSha512) {
+            target.delete()
+            throw new GradleException("dynamic-vehicles ${dynamicVehiclesVersion} sha512 mismatch: ${actual}")
+        }
+    }
+}
+
 base {
     archivesName = mod_id
 }
@@ -78,6 +105,7 @@ neoForge {
 }
 
 dependencies {
+    compileOnly files(dynamicVehiclesJar).builtBy(tasks.named("downloadDynamicVehicles"))
     testImplementation platform("org.junit:junit-bom:5.11.4")
     testImplementation "org.junit.jupiter:junit-jupiter"
     testRuntimeOnly "org.junit.platform:junit-platform-launcher"
