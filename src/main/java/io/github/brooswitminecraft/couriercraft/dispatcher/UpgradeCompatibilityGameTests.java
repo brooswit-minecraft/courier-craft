@@ -33,7 +33,13 @@ import java.util.UUID;
 public final class UpgradeCompatibilityGameTests {
     private UpgradeCompatibilityGameTests() {}
 
-    @GameTest(templateNamespace = "dynamicvehicles", template = "dispatch_profession")
+    // Explicit batch (its own method name): without it, GameTestRunner lumps every un-batched
+    // test into one "defaultBatch" and the log never names an individual method -- CI's
+    // check_gametest_count.py greps the log for both method names specifically (MINECRAFT-493
+    // review comment 52321's "require actual named tests in hosted results"), so they need to
+    // appear in it literally.
+    @GameTest(templateNamespace = "dynamicvehicles", template = "dispatch_profession",
+            batch = "legacyRegistryNamesStillResolveAfterTheSplit")
     public static void legacyRegistryNamesStillResolveAfterTheSplit(GameTestHelper helper) {
         ResourceLocation dispatchBoard = ResourceLocation.parse("dynamicvehicles:dispatch_board");
         ResourceLocation dispatcher = ResourceLocation.parse("dynamicvehicles:dispatcher");
@@ -54,7 +60,8 @@ public final class UpgradeCompatibilityGameTests {
         helper.succeed();
     }
 
-    @GameTest(templateNamespace = "dynamicvehicles", template = "dispatch_profession")
+    @GameTest(templateNamespace = "dynamicvehicles", template = "dispatch_profession",
+            batch = "preSplitSavedContractNbtLoadsThroughTheRelocatedStorage")
     public static void preSplitSavedContractNbtLoadsThroughTheRelocatedStorage(GameTestHelper helper) {
         UUID playerId = UUID.randomUUID();
         UUID sourceVillagerId = UUID.randomUUID();
