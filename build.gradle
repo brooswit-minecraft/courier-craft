@@ -121,6 +121,15 @@ neoForge {
 
 dependencies {
     compileOnly files(dynamicVehiclesJar).builtBy(tasks.named("downloadDynamicVehicles"))
+    // test-only, plain JUnit classpath: unlike the main runtime classpath, the `test` task never
+    // goes through NeoForge's mod loader at all (it's just raw JVM classes), so this carries none
+    // of the "NeoForge tries to load it as a mod and needs its own Sable/dynamic-terrain
+    // dependencies" risk the earlier required-dependency attempt hit. Lets
+    // ContractWaypointOverlayCoinstalledTest call the real DynamicVehiclesBridge against Dynamic
+    // Vehicles' REAL hud.MissionWaypointLayout and prove the optional integration actually shares
+    // its state with Pathfinder, not just assert it in a comment (MINECRAFT-493 review comment
+    // 52327/52330).
+    testImplementation files(dynamicVehiclesJar).builtBy(tasks.named("downloadDynamicVehicles"))
     testImplementation platform("org.junit:junit-bom:5.11.4")
     testImplementation "org.junit.jupiter:junit-jupiter"
     testRuntimeOnly "org.junit.platform:junit-platform-launcher"

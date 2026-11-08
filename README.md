@@ -42,6 +42,26 @@ run in CI via `gradlew runGameTestServer` (see `scripts/check_gametest_count.py`
 for the fail-closed guard, including an explicit check that both
 `UpgradeCompatibilityGameTests` methods specifically ran).
 
+**Coinstalled coordination, hosted proof (MINECRAFT-493 review comments
+52327/52328/52330):** `ContractWaypointOverlayCoinstalledTest` (in the
+`test` sourceSet) puts Dynamic Vehicles' real jar on the plain JUnit test
+classpath only — a `test` task never goes through NeoForge's mod loader at
+all, so this carries none of the "tries to load it as a mod, needs Sable/
+dynamic-terrain" risk the earlier required-dependency attempt hit on the
+main runtime classpath — and calls `ContractWaypointOverlay`'s own bridge
+directly against Dynamic Vehicles' real `hud.MissionWaypointLayout`. It
+proves, with the real production code path: a Dispatcher reservation made
+through the bridge and a Pathfinder reservation made through Dynamic
+Vehicles' own API never overlap, a shared bottom-edge placement resolves
+correctly, and clearing the Dispatcher slot through the bridge releases it
+for Pathfinder — the exact three behaviors reviewers asked to see
+demonstrated. What this does NOT cover: an actual two-mod NeoForge
+bootstrap/class-loading run (both mods really mod-loaded together, the way
+a true client-acceptance job like dynamic-vehicles' own would) — that
+remains unverified here; flagging as a further candidate rather than
+building a full client-acceptance harness under this ticket's bounded
+scope.
+
 Root cause of the earlier "zero `@GameTest` methods discovered" CI failure,
 for the record: NeoForge selects a `@GameTest` by its *effective*
 namespace — the enclosing `@GameTestHolder`'s, UNLESS the test's own

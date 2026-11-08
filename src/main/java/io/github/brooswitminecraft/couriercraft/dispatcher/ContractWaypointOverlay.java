@@ -72,11 +72,17 @@ public final class ContractWaypointOverlay implements LayeredDraw.Layer {
 
     /**
      * Isolates every reference to Dynamic Vehicles' own classes in its own class, so they are
-     * only ever linked when {@link #dynamicVehiclesLoaded} is true and one of these two methods
-     * is actually called -- never merely by {@link ContractWaypointOverlay} loading, which would
-     * otherwise require Dynamic Vehicles' jar on the runtime classpath unconditionally.
+     * only ever linked when {@link #dynamicVehiclesLoaded} is true and one of these two render
+     * methods is actually called -- never merely by {@link ContractWaypointOverlay} loading,
+     * which would otherwise require Dynamic Vehicles' jar on the runtime classpath
+     * unconditionally. Package-visible (not {@code private}) so {@code
+     * ContractWaypointOverlayCoinstalledTest} -- in the {@code test} sourceSet, which has Dynamic
+     * Vehicles' real jar on ITS classpath only, never this mod's own runtime one -- can call
+     * {@link #reserveForTesting} directly and prove this bridge genuinely shares Dynamic
+     * Vehicles' real {@code MissionWaypointLayout} state with Pathfinder's own waypoint, rather
+     * than merely asserting it in a javadoc comment (MINECRAFT-493 review comment 52327/52330).
      */
-    private static final class DynamicVehiclesBridge {
+    static final class DynamicVehiclesBridge {
         private DynamicVehiclesBridge() {}
 
         static void renderMarker(GuiGraphics graphics, Minecraft minecraft, DeliveryHudPayload hud, int color, String distance) {
@@ -88,6 +94,20 @@ public final class ContractWaypointOverlay implements LayeredDraw.Layer {
         static void clear() {
             io.github.brooswitminecraft.dynamicvehicles.hud.MissionWaypointLayout.clear(
                     io.github.brooswitminecraft.dynamicvehicles.hud.MissionWaypointLayout.Mission.DISPATCHER);
+        }
+
+        /**
+         * Test-only: performs exactly the reservation step {@link #renderMarker} does (via
+         * Dynamic Vehicles' real {@code MissionWaypointLayout.reserve}), without needing a real
+         * {@link GuiGraphics}/{@link Minecraft} instance to draw with -- the reservation/overlap-
+         * avoidance math is independent of actually painting pixels. Returns Dynamic Vehicles'
+         * own {@code Rect} type directly; callers must already have Dynamic Vehicles on their own
+         * classpath to do anything useful with it (true only of the {@code test} sourceSet).
+         */
+        static io.github.brooswitminecraft.dynamicvehicles.hud.Rect reserveForTesting(
+                io.github.brooswitminecraft.dynamicvehicles.hud.Rect candidate, int viewportHeight) {
+            return io.github.brooswitminecraft.dynamicvehicles.hud.MissionWaypointLayout.reserve(
+                    io.github.brooswitminecraft.dynamicvehicles.hud.MissionWaypointLayout.Mission.DISPATCHER, candidate, viewportHeight);
         }
     }
 }
