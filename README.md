@@ -11,16 +11,20 @@ contracts, pillager ambushes, and the contract HUD/waypoint.
 
 ## Install / upgrade pairing
 
-Runs fully standalone — no dependency on Dynamic Vehicles or any other mod.
-A required or optional dependency on it was tried and dropped: Dynamic
-Vehicles itself requires a licensed physics companion and a separately
-released terrain mod, so pulling it in transitively (even just to reuse its
-HUD rendering) made this mod refuse to load without those too, confirmed by
-CI. See `ContractWaypointOverlay`'s own javadoc for the resulting known
-limitation: when both mods are installed together, Dispatcher's and
-Pathfinder's waypoint markers no longer coordinate overlap avoidance with
-each other (each mod now keeps its own independent copy of that layout
-logic) — a candidate for a follow-up ticket, not solved here.
+Runs fully standalone: nothing here requires Dynamic Vehicles. When Dynamic
+Vehicles IS also installed (an optional, client-only `neoforge.mods.toml`
+dependency), the Dispatcher HUD/waypoint overlay (`ContractWaypointOverlay`)
+detects it at runtime and delegates to its real mission-waypoint
+coexistence kernel instead of this mod's own standalone copy, so
+Dispatcher's and Pathfinder's markers keep coordinating overlap avoidance
+exactly as before this mod existed. Only `ContractWaypointOverlay`'s own
+compile-time reference to Dynamic Vehicles' classes is ever resolved, and
+only when that mod is actually present (`ModList.isLoaded`) — Dynamic
+Vehicles is compileOnly, never on this mod's own runtime classpath, so this
+mod's build and tests never attempt to load it as a mod at all (and so
+never need ITS OWN required dependencies, a licensed physics companion and
+a separately-released terrain mod, which is what failed when an earlier
+version of this made the dependency required instead of optional).
 
 An existing world that placed a Dispatch Board, spawned a Dispatcher
 villager, or saved a delivery contract under the pre-split Dynamic Vehicles
@@ -33,21 +37,21 @@ Vehicles past this split *without* installing Courier Craft is not a
 supported pairing: the Dispatcher simply doesn't come back, the same as
 removing any other mod. `DispatcherGameTests`, `SettlementFounderGameTests`,
 and `UpgradeCompatibilityGameTests` (registry-name resolution and the saved
-contract NBT) express this mod's behavioral/compatibility test coverage.
+contract NBT) express this mod's behavioral/compatibility test coverage,
+run in CI via `gradlew runGameTestServer` (see `scripts/check_gametest_count.py`
+for the fail-closed guard, including an explicit check that both
+`UpgradeCompatibilityGameTests` methods specifically ran).
 
-**Known gap, not solved here:** `./gradlew runGameTestServer` currently
-reports `No test functions were given!` for this mod — the test server
-starts, but discovers zero `@GameTest` methods, for a reason substantial
-investigation here did not root-cause (ruled out: `@GameTest`
-`templateNamespace` syntax, an external dependency on the runtime
-classpath, access transformers, and an explicit `RegisterGameTestsEvent`
-requirement — dynamic-vehicles itself needs none of those and finds its
-hundreds of tests fine with the identical `@GameTestHolder` pattern). CI
-therefore currently runs `./gradlew build` only (compile + plain unit
-tests); none of the three GameTest classes above are actually exercised
-yet. Needs either a NeoForge ModDev tooling expert's input or a dedicated
-follow-up ticket before CI can re-gain the `gameTestServer` step dynamic-
-vehicles has.
+Root cause of the earlier "zero `@GameTest` methods discovered" CI failure,
+for the record: NeoForge selects a `@GameTest` by its *effective*
+namespace — the enclosing `@GameTestHolder`'s, UNLESS the test's own
+`templateNamespace` overrides it, which changes which namespace the test is
+*selected* under too, not just where its structure is looked up. The three
+GameTest classes above all set `templateNamespace = "dynamicvehicles"` (the
+structures they reuse kept that legacy namespace), so `build.gradle`'s
+`enabledGameTestNamespaces` must include `dynamicvehicles` alongside this
+mod's own `couriercraft`, or every one of them is silently filtered out
+before registration ever happens.
 
 ## Building
 

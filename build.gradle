@@ -21,6 +21,37 @@ sourceSets.main.resources {
     exclude("src/generated/**/.cache")
 }
 
+repositories {
+    // dynamic-vehicles is not on a maven repository; fetched from its GitHub release, pinned by
+    // version and verified by sha512, same pattern dynamic-vehicles itself uses for
+    // dynamic-terrain. compileOnly ONLY below (never runtimeOnly): this is strictly an optional
+    // dependency (neoforge.mods.toml), resolved at compile time only so ContractWaypointOverlay's
+    // ModList-guarded integration code can reference its classes. Putting it on the runtime
+    // classpath too would make NeoForge try to load it as an actual mod -- which (confirmed by
+    // CI) fails outright here, since dynamic-vehicles itself requires a licensed physics
+    // companion and a separate terrain mod that aren't present in this build.
+    mavenCentral()
+}
+
+def dynamicVehiclesJar = layout.buildDirectory.file("dynamicvehicles/dynamicvehicles-${project.dynamicvehicles_version}.jar")
+def dynamicVehiclesVersion = project.dynamicvehicles_version
+def dynamicVehiclesSha512 = project.dynamicvehicles_sha512
+tasks.register("downloadDynamicVehicles") {
+    outputs.file(dynamicVehiclesJar)
+    doLast {
+        def target = dynamicVehiclesJar.get().asFile
+        target.parentFile.mkdirs()
+        def url = "https://github.com/brooswit-minecraft/dynamic-vehicles/releases/download/v${dynamicVehiclesVersion}/dynamicvehicles-${dynamicVehiclesVersion}.jar"
+        new URL(url).withInputStream { input -> target.withOutputStream { it << input } }
+        def digest = java.security.MessageDigest.getInstance("SHA-512")
+        def actual = digest.digest(target.bytes).encodeHex().toString()
+        if (actual != dynamicVehiclesSha512) {
+            target.delete()
+            throw new GradleException("dynamic-vehicles ${dynamicVehiclesVersion} sha512 mismatch: ${actual}")
+        }
+    }
+}
+
 base {
     archivesName = mod_id
 }
@@ -36,6 +67,17 @@ neoForge {
         minecraftVersion = project.parchment_minecraft_version
     }
 
+    // NeoForge selects a @GameTest by its EFFECTIVE namespace: the enclosing @GameTestHolder's
+    // namespace, UNLESS a test's own templateNamespace overrides it -- that override changes which
+    // namespace the test is selected under too, not just where its structure is looked up.
+    // DispatcherGameTests/SettlementFounderGameTests/UpgradeCompatibilityGameTests all set
+    // templateNamespace = "dynamicvehicles" (the structures kept that legacy namespace for save
+    // compat), so "dynamicvehicles" must be enabled here too or every one of them is silently
+    // filtered out before registration -- not a classloading or compile issue, confirmed by
+    // MINECRAFT-493 review (comment 52318) after this repo's own build.gradle shipped with only
+    // project.mod_id enabled and every GameTest run reported zero discovered tests.
+    def gameTestNamespaces = "${project.mod_id},dynamicvehicles"
+
     runs {
         client {
             client()
@@ -45,18 +87,18 @@ neoForge {
             if (project.hasProperty('quickPlayMp')) {
                 programArguments.addAll('--quickPlayMultiplayer', project.property('quickPlayMp'))
             }
-            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+            systemProperty 'neoforge.enabledGameTestNamespaces', gameTestNamespaces
         }
 
         server {
             server()
             programArgument '--nogui'
-            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+            systemProperty 'neoforge.enabledGameTestNamespaces', gameTestNamespaces
         }
 
         gameTestServer {
             type = "gameTestServer"
-            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+            systemProperty 'neoforge.enabledGameTestNamespaces', gameTestNamespaces
         }
 
         data {
@@ -78,6 +120,7 @@ neoForge {
 }
 
 dependencies {
+    compileOnly files(dynamicVehiclesJar).builtBy(tasks.named("downloadDynamicVehicles"))
     testImplementation platform("org.junit:junit-bom:5.11.4")
     testImplementation "org.junit.jupiter:junit-jupiter"
     testRuntimeOnly "org.junit.platform:junit-platform-launcher"

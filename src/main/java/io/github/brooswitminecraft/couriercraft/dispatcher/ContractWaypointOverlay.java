@@ -4,6 +4,7 @@ import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.LayeredDraw;
+import net.neoforged.fml.ModList;
 
 import java.util.List;
 
@@ -11,39 +12,82 @@ import java.util.List;
  * Additive world-projected waypoint marker for the active delivery contract.
  *
  * <p>MINECRAFT-493 review (comment 52304): the original Dynamic Vehicles version of this overlay
- * shared {@link MissionWaypointLayout} with Pathfinder's own waypoint, so an active marker from
- * each never overlapped. {@link MissionWaypointLayout} and {@link MissionWaypointRenderer} are
- * kept here as this mod's own copy instead of a dependency on Dynamic Vehicles: a required
- * dependency on it transitively requires Dynamic Vehicles' own required dependencies (a licensed
- * physics companion and a separately-released terrain mod) just to render a HUD marker, which CI
- * confirmed by actually trying it -- Dynamic Vehicles refuses to load without them, so the
- * gameTestServer run crashed outright. A soft/optional dependency has the same problem whenever
- * it is actually present and loaded.
+ * shared {@code hud.MissionWaypointLayout} with Pathfinder's own waypoint, so an active marker
+ * from each never overlapped. This mod keeps its own copy of that same kernel ({@link
+ * MissionWaypointLayout}, {@link MissionWaypointRenderer}) so it still renders a marker when run
+ * fully standalone (no Dynamic Vehicles installed at all) -- the common case this mod's own
+ * {@code neoforge.mods.toml} and CI need to support, since a required dependency on Dynamic
+ * Vehicles transitively requires ITS OWN required dependencies (a licensed physics companion and
+ * a separately-released terrain mod) just to render a HUD marker, confirmed by CI refusing to
+ * load the mod at all once tried.
  *
- * <p>Known limitation this leaves open: when both mods are installed together, Dispatcher's and
- * Pathfinder's markers each read their own mod's independent copy of {@code MissionWaypointLayout}
- * and so no longer coordinate overlap avoidance between the two -- a coincident Dispatcher and
- * Pathfinder marker can draw on top of each other again, the exact MINECRAFT-411/PR #177 bug this
- * class originally fixed. Flagged as a follow-up rather than solved here (a shared, dependency-free
- * "common" library between the two mods is the likely real fix, not something to improvise under
- * this ticket's bounded scope).
+ * <p>When Dynamic Vehicles IS present (an optional, client-only {@code neoforge.mods.toml}
+ * dependency -- never required), {@link #render} instead delegates to ITS real {@code
+ * hud.MissionWaypointLayout}/{@code MissionWaypointRenderer}, the same instance Pathfinder's own
+ * waypoint renders through, so the two mods' markers keep coordinating overlap avoidance exactly
+ * as before the split. {@link #dynamicVehiclesLoaded} gates which path runs; the
+ * Dynamic-Vehicles-specific branch's classes are therefore only ever linked/verified by the JVM
+ * when that check is true, so their absence is harmless when it is false (standard optional-
+ * mod-dependency pattern -- never put a plain static import of an optional dependency's class at
+ * the top of this file, or every caller pays for resolving it unconditionally).
  */
 public final class ContractWaypointOverlay implements LayeredDraw.Layer {
+    private static final String DYNAMIC_VEHICLES_MODID = "dynamicvehicles";
+
     @Override
     public void render(GuiGraphics graphics, DeltaTracker deltaTracker) {
         DeliveryHudPayload hud = ClientContractHud.current();
         Minecraft minecraft = Minecraft.getInstance();
         if (!hud.active() || minecraft.player == null || minecraft.level == null) {
-            // No marker occupies screen space this frame; clear so Pathfinder (rendered after this
-            // overlay) never avoids a now-stale Dispatcher panel (MINECRAFT-411 PR #177 review).
-            MissionWaypointLayout.clear(MissionWaypointLayout.Mission.DISPATCHER);
+            clear();
             return;
         }
         int color = DangerGauge.colorArgb(hud.danger(), hud.dangerMin(), hud.dangerMax());
         double dx = hud.destinationX() - minecraft.player.getX();
         double dz = hud.destinationZ() - minecraft.player.getZ();
         String distance = OfferDistanceFormat.format(Math.sqrt(dx * dx + dz * dz));
-        MissionWaypointRenderer.renderMarker(graphics, minecraft, MissionWaypointLayout.Mission.DISPATCHER,
-                hud.destinationX(), hud.destinationY(), hud.destinationZ(), color, distance, List.of());
+        if (dynamicVehiclesLoaded()) {
+            DynamicVehiclesBridge.renderMarker(graphics, minecraft, hud, color, distance);
+        } else {
+            // No marker occupies screen space this frame; clear so Pathfinder (rendered after
+            // this overlay) never avoids a now-stale Dispatcher panel (MINECRAFT-411 PR #177
+            // review) -- only meaningful for this mod's own standalone kernel copy; the
+            // Dynamic-Vehicles-backed branch above clears through DynamicVehiclesBridge instead.
+            MissionWaypointRenderer.renderMarker(graphics, minecraft, MissionWaypointLayout.Mission.DISPATCHER,
+                    hud.destinationX(), hud.destinationY(), hud.destinationZ(), color, distance, List.of());
+        }
+    }
+
+    private void clear() {
+        if (dynamicVehiclesLoaded()) {
+            DynamicVehiclesBridge.clear();
+        } else {
+            MissionWaypointLayout.clear(MissionWaypointLayout.Mission.DISPATCHER);
+        }
+    }
+
+    private static boolean dynamicVehiclesLoaded() {
+        return ModList.get().isLoaded(DYNAMIC_VEHICLES_MODID);
+    }
+
+    /**
+     * Isolates every reference to Dynamic Vehicles' own classes in its own class, so they are
+     * only ever linked when {@link #dynamicVehiclesLoaded} is true and one of these two methods
+     * is actually called -- never merely by {@link ContractWaypointOverlay} loading, which would
+     * otherwise require Dynamic Vehicles' jar on the runtime classpath unconditionally.
+     */
+    private static final class DynamicVehiclesBridge {
+        private DynamicVehiclesBridge() {}
+
+        static void renderMarker(GuiGraphics graphics, Minecraft minecraft, DeliveryHudPayload hud, int color, String distance) {
+            io.github.brooswitminecraft.dynamicvehicles.hud.MissionWaypointRenderer.renderMarker(graphics, minecraft,
+                    io.github.brooswitminecraft.dynamicvehicles.hud.MissionWaypointLayout.Mission.DISPATCHER,
+                    hud.destinationX(), hud.destinationY(), hud.destinationZ(), color, distance, List.of());
+        }
+
+        static void clear() {
+            io.github.brooswitminecraft.dynamicvehicles.hud.MissionWaypointLayout.clear(
+                    io.github.brooswitminecraft.dynamicvehicles.hud.MissionWaypointLayout.Mission.DISPATCHER);
+        }
     }
 }

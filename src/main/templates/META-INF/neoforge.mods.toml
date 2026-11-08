@@ -23,3 +23,16 @@ description='''Dispatcher-driven delivery contracts, extracted from Dynamic Vehi
     versionRange="${minecraft_version_range}"
     ordering="NONE"
     side="BOTH"
+
+# Optional, CLIENT only -- never required: this mod runs fully standalone without it. When
+# Dynamic Vehicles is ALSO installed, the Dispatcher HUD/waypoint overlay (dispatcher/
+# ContractWaypointOverlay) detects it at runtime and delegates to its real mission-waypoint
+# coexistence kernel instead of this mod's own standalone copy, so Dispatcher's and Pathfinder's
+# markers keep coordinating overlap avoidance exactly as before this mod existed -- MINECRAFT-493
+# review (comments 52304, 52318, 52320).
+[[dependencies.${mod_id}]]
+    modId="dynamicvehicles"
+    type="optional"
+    versionRange="[0.82.0,)"
+    ordering="AFTER"
+    side="CLIENT"
