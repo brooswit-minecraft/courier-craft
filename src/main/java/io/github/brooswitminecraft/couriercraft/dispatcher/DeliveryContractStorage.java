@@ -50,7 +50,8 @@ public final class DeliveryContractStorage extends SavedData {
         foundedSettlements.add(key);
     }
 
-    private static DeliveryContractStorage load(CompoundTag tag, HolderLookup.Provider registries) {
+    /** Package-visible so a GameTest can feed it a pre-split-schema tag directly (MINECRAFT-493 upgrade-compatibility check). */
+    static DeliveryContractStorage load(CompoundTag tag, HolderLookup.Provider registries) {
         DeliveryContractStorage storage = new DeliveryContractStorage();
         List<DeliveryContract> loaded = new ArrayList<>();
         ListTag list = tag.getList("Contracts", Tag.TAG_COMPOUND);
