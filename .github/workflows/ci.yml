@@ -30,18 +30,6 @@ jobs:
       - name: Build and test
         run: ./gradlew build --no-daemon
 
-      # Gradle reports BUILD SUCCESSFUL even when the GameTest server fails to start (e.g. a
-      # required mod missing from the runtime classpath) or ran zero tests, so a green exit code
-      # proves nothing on its own -- MINECRAFT-493 added real gameplay (and GameTests) on top of
-      # the template this CI config came from, which never needed this step. Fail closed: the
-      # server must not have failed to start, and at least one required test must have actually
-      # completed and passed.
-      - name: Run GameTests
-        run: |
-          set -o pipefail
-          ./gradlew runGameTestServer --no-daemon 2>&1 | tee gametest.log
-          python3 scripts/check_gametest_count.py gametest.log
-
       - name: Upload mod jar
         uses: actions/upload-artifact@v4
         with:

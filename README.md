@@ -31,9 +31,23 @@ registry object kept its pre-split `dynamicvehicles` registry name, and
 NBT schema the old, not-yet-split Dynamic Vehicles wrote. Upgrading Dynamic
 Vehicles past this split *without* installing Courier Craft is not a
 supported pairing: the Dispatcher simply doesn't come back, the same as
-removing any other mod. `UpgradeCompatibilityGameTests` is the automated
-regression guard for both of those (registry-name resolution and the saved
-contract NBT), run in CI via `gameTestServer`.
+removing any other mod. `DispatcherGameTests`, `SettlementFounderGameTests`,
+and `UpgradeCompatibilityGameTests` (registry-name resolution and the saved
+contract NBT) express this mod's behavioral/compatibility test coverage.
+
+**Known gap, not solved here:** `./gradlew runGameTestServer` currently
+reports `No test functions were given!` for this mod — the test server
+starts, but discovers zero `@GameTest` methods, for a reason substantial
+investigation here did not root-cause (ruled out: `@GameTest`
+`templateNamespace` syntax, an external dependency on the runtime
+classpath, access transformers, and an explicit `RegisterGameTestsEvent`
+requirement — dynamic-vehicles itself needs none of those and finds its
+hundreds of tests fine with the identical `@GameTestHolder` pattern). CI
+therefore currently runs `./gradlew build` only (compile + plain unit
+tests); none of the three GameTest classes above are actually exercised
+yet. Needs either a NeoForge ModDev tooling expert's input or a dedicated
+follow-up ticket before CI can re-gain the `gameTestServer` step dynamic-
+vehicles has.
 
 ## Building
 
