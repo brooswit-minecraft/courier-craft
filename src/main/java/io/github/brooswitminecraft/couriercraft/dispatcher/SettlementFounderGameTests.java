@@ -51,7 +51,7 @@ public final class SettlementFounderGameTests {
         return new int[] {helper.getLevel().random.nextInt(), helper.getLevel().random.nextInt()};
     }
 
-    @GameTest(template = "dynamicvehicles:settlement_test")
+    @GameTest(templateNamespace = "dynamicvehicles", template = "settlement_test")
     public static void arrivalPlacesExactlyOneBoardAndOneDispatcherOnTheSurface(GameTestHelper helper) {
         prepareFlatGround(helper);
         BlockPos absoluteAnchor = helper.absolutePos(ANCHOR);
@@ -85,7 +85,7 @@ public final class SettlementFounderGameTests {
     }
 
     /** AC: the top of water is an acceptable surface, with the water itself left untouched. */
-    @GameTest(template = "dynamicvehicles:settlement_test")
+    @GameTest(templateNamespace = "dynamicvehicles", template = "settlement_test")
     public static void arrivalPlacesTheBoardOnTopOfWaterWithoutDisturbingIt(GameTestHelper helper) {
         for (int x = 0; x < 10; x++) {
             for (int z = 0; z < 10; z++) {
@@ -121,7 +121,7 @@ public final class SettlementFounderGameTests {
      * {@code MOTION_BLOCKING_NO_LEAVES} heightmap ignores, exactly the low-canopy case the board
      * cell check guards against - defers without mutating anything.
      */
-    @GameTest(template = "dynamicvehicles:settlement_test")
+    @GameTest(templateNamespace = "dynamicvehicles", template = "settlement_test")
     public static void arrivalUnderALowCanopyDefersWithoutMutatingAnything(GameTestHelper helper) {
         for (int x = 0; x < 10; x++) {
             for (int z = 0; z < 10; z++) {
@@ -162,7 +162,7 @@ public final class SettlementFounderGameTests {
      * destination within a single run: repeated arrival, reconnect, and restart paths must not
      * place a second board or a second villager.
      */
-    @GameTest(template = "dynamicvehicles:settlement_test")
+    @GameTest(templateNamespace = "dynamicvehicles", template = "settlement_test")
     public static void repeatedArrivalAtTheSameDestinationDoesNotDuplicatePlacement(GameTestHelper helper) {
         prepareFlatGround(helper);
         BlockPos absoluteAnchor = helper.absolutePos(ANCHOR);

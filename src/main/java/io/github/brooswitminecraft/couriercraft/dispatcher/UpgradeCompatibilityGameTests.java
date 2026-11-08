@@ -33,7 +33,7 @@ import java.util.UUID;
 public final class UpgradeCompatibilityGameTests {
     private UpgradeCompatibilityGameTests() {}
 
-    @GameTest(template = "dynamicvehicles:dispatch_profession")
+    @GameTest(templateNamespace = "dynamicvehicles", template = "dispatch_profession")
     public static void legacyRegistryNamesStillResolveAfterTheSplit(GameTestHelper helper) {
         ResourceLocation dispatchBoard = ResourceLocation.parse("dynamicvehicles:dispatch_board");
         ResourceLocation dispatcher = ResourceLocation.parse("dynamicvehicles:dispatcher");
@@ -54,7 +54,7 @@ public final class UpgradeCompatibilityGameTests {
         helper.succeed();
     }
 
-    @GameTest(template = "dynamicvehicles:dispatch_profession")
+    @GameTest(templateNamespace = "dynamicvehicles", template = "dispatch_profession")
     public static void preSplitSavedContractNbtLoadsThroughTheRelocatedStorage(GameTestHelper helper) {
         UUID playerId = UUID.randomUUID();
         UUID sourceVillagerId = UUID.randomUUID();

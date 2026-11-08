@@ -42,7 +42,7 @@ import java.util.UUID;
 public final class DispatcherGameTests {
     private DispatcherGameTests() {}
 
-    @GameTest(template = "dynamicvehicles:dispatch_profession", timeoutTicks = 600)
+    @GameTest(templateNamespace = "dynamicvehicles", template = "dispatch_profession", timeoutTicks = 600)
     public static void joblessVillagerNextToDispatchBoardBecomesDispatcher(GameTestHelper helper) {
         helper.setBlock(new BlockPos(2, 2, 2), DispatcherBlocks.DISPATCH_BOARD.get());
         Villager villager = helper.spawn(EntityType.VILLAGER, new BlockPos(2, 2, 3));
@@ -54,7 +54,7 @@ public final class DispatcherGameTests {
         });
     }
 
-    @GameTest(template = "dynamicvehicles:dispatch_profession")
+    @GameTest(templateNamespace = "dynamicvehicles", template = "dispatch_profession")
     public static void rightClickingADispatcherOpensTheOffersMenu(GameTestHelper helper) {
         Villager villager = helper.spawn(EntityType.VILLAGER, new BlockPos(2, 2, 2));
         villager.setVillagerData(villager.getVillagerData().setProfession(DispatcherProfession.DISPATCHER.get()));
@@ -81,7 +81,7 @@ public final class DispatcherGameTests {
     }
 
     /** MINECRAFT-323 AC1/AC2: right-clicking the board itself opens the same offers menu, as a fixed level-one dispatch source. */
-    @GameTest(template = "dynamicvehicles:dispatch_profession")
+    @GameTest(templateNamespace = "dynamicvehicles", template = "dispatch_profession")
     public static void rightClickingTheDispatchBoardOpensTheOffersMenu(GameTestHelper helper) {
         BlockPos boardPos = new BlockPos(2, 2, 2);
         helper.setBlock(boardPos, DispatcherBlocks.DISPATCH_BOARD.get());
@@ -107,7 +107,7 @@ public final class DispatcherGameTests {
     }
 
     /** MINECRAFT-323 AC4: a placed board's UUID survives its block entity being reloaded from NBT. */
-    @GameTest(template = "dynamicvehicles:dispatch_profession")
+    @GameTest(templateNamespace = "dynamicvehicles", template = "dispatch_profession")
     public static void dispatchBoardPersistsItsUuidAcrossReload(GameTestHelper helper) {
         BlockPos boardPos = new BlockPos(2, 2, 2);
         helper.setBlock(boardPos, DispatcherBlocks.DISPATCH_BOARD.get());
