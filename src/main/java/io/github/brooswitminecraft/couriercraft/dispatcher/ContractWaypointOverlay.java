@@ -25,11 +25,13 @@ import java.util.List;
  * dependency -- never required), {@link #render} instead delegates to ITS real {@code
  * hud.MissionWaypointLayout}/{@code MissionWaypointRenderer}, the same instance Pathfinder's own
  * waypoint renders through, so the two mods' markers keep coordinating overlap avoidance exactly
- * as before the split. {@link #dynamicVehiclesLoaded} gates which path runs; the
- * Dynamic-Vehicles-specific branch's classes are therefore only ever linked/verified by the JVM
- * when that check is true, so their absence is harmless when it is false (standard optional-
- * mod-dependency pattern -- never put a plain static import of an optional dependency's class at
- * the top of this file, or every caller pays for resolving it unconditionally).
+ * as before the split. {@link #dynamicVehiclesLoaded} gates which path runs; every reference to
+ * Dynamic Vehicles' own classes below is therefore only ever linked when that check is true, so
+ * their absence is harmless when it is false (standard optional-mod-dependency pattern -- never
+ * put a plain static import of an optional dependency's class at the top of this file, or every
+ * caller pays for resolving it unconditionally). {@link DynamicVehiclesWaypointState} isolates
+ * the Minecraft-free part of that sharing (the reservation math) so it is also independently,
+ * directly testable -- see {@code ContractWaypointOverlayCoinstalledTest}.
  */
 public final class ContractWaypointOverlay implements LayeredDraw.Layer {
     private static final String DYNAMIC_VEHICLES_MODID = "dynamicvehicles";
@@ -47,12 +49,15 @@ public final class ContractWaypointOverlay implements LayeredDraw.Layer {
         double dz = hud.destinationZ() - minecraft.player.getZ();
         String distance = OfferDistanceFormat.format(Math.sqrt(dx * dx + dz * dz));
         if (dynamicVehiclesLoaded()) {
-            DynamicVehiclesBridge.renderMarker(graphics, minecraft, hud, color, distance);
+            io.github.brooswitminecraft.dynamicvehicles.hud.MissionWaypointRenderer.renderMarker(graphics, minecraft,
+                    io.github.brooswitminecraft.dynamicvehicles.hud.MissionWaypointLayout.Mission.DISPATCHER,
+                    hud.destinationX(), hud.destinationY(), hud.destinationZ(), color, distance, List.of());
         } else {
             // No marker occupies screen space this frame; clear so Pathfinder (rendered after
             // this overlay) never avoids a now-stale Dispatcher panel (MINECRAFT-411 PR #177
             // review) -- only meaningful for this mod's own standalone kernel copy; the
-            // Dynamic-Vehicles-backed branch above clears through DynamicVehiclesBridge instead.
+            // Dynamic-Vehicles-backed branch above shares DynamicVehiclesWaypointState's clear
+            // instead.
             MissionWaypointRenderer.renderMarker(graphics, minecraft, MissionWaypointLayout.Mission.DISPATCHER,
                     hud.destinationX(), hud.destinationY(), hud.destinationZ(), color, distance, List.of());
         }
@@ -60,7 +65,7 @@ public final class ContractWaypointOverlay implements LayeredDraw.Layer {
 
     private void clear() {
         if (dynamicVehiclesLoaded()) {
-            DynamicVehiclesBridge.clear();
+            DynamicVehiclesWaypointState.clear();
         } else {
             MissionWaypointLayout.clear(MissionWaypointLayout.Mission.DISPATCHER);
         }
@@ -68,46 +73,5 @@ public final class ContractWaypointOverlay implements LayeredDraw.Layer {
 
     private static boolean dynamicVehiclesLoaded() {
         return ModList.get().isLoaded(DYNAMIC_VEHICLES_MODID);
-    }
-
-    /**
-     * Isolates every reference to Dynamic Vehicles' own classes in its own class, so they are
-     * only ever linked when {@link #dynamicVehiclesLoaded} is true and one of these two render
-     * methods is actually called -- never merely by {@link ContractWaypointOverlay} loading,
-     * which would otherwise require Dynamic Vehicles' jar on the runtime classpath
-     * unconditionally. Package-visible (not {@code private}) so {@code
-     * ContractWaypointOverlayCoinstalledTest} -- in the {@code test} sourceSet, which has Dynamic
-     * Vehicles' real jar on ITS classpath only, never this mod's own runtime one -- can call
-     * {@link #reserveForTesting} directly and prove this bridge genuinely shares Dynamic
-     * Vehicles' real {@code MissionWaypointLayout} state with Pathfinder's own waypoint, rather
-     * than merely asserting it in a javadoc comment (MINECRAFT-493 review comment 52327/52330).
-     */
-    static final class DynamicVehiclesBridge {
-        private DynamicVehiclesBridge() {}
-
-        static void renderMarker(GuiGraphics graphics, Minecraft minecraft, DeliveryHudPayload hud, int color, String distance) {
-            io.github.brooswitminecraft.dynamicvehicles.hud.MissionWaypointRenderer.renderMarker(graphics, minecraft,
-                    io.github.brooswitminecraft.dynamicvehicles.hud.MissionWaypointLayout.Mission.DISPATCHER,
-                    hud.destinationX(), hud.destinationY(), hud.destinationZ(), color, distance, List.of());
-        }
-
-        static void clear() {
-            io.github.brooswitminecraft.dynamicvehicles.hud.MissionWaypointLayout.clear(
-                    io.github.brooswitminecraft.dynamicvehicles.hud.MissionWaypointLayout.Mission.DISPATCHER);
-        }
-
-        /**
-         * Test-only: performs exactly the reservation step {@link #renderMarker} does (via
-         * Dynamic Vehicles' real {@code MissionWaypointLayout.reserve}), without needing a real
-         * {@link GuiGraphics}/{@link Minecraft} instance to draw with -- the reservation/overlap-
-         * avoidance math is independent of actually painting pixels. Returns Dynamic Vehicles'
-         * own {@code Rect} type directly; callers must already have Dynamic Vehicles on their own
-         * classpath to do anything useful with it (true only of the {@code test} sourceSet).
-         */
-        static io.github.brooswitminecraft.dynamicvehicles.hud.Rect reserveForTesting(
-                io.github.brooswitminecraft.dynamicvehicles.hud.Rect candidate, int viewportHeight) {
-            return io.github.brooswitminecraft.dynamicvehicles.hud.MissionWaypointLayout.reserve(
-                    io.github.brooswitminecraft.dynamicvehicles.hud.MissionWaypointLayout.Mission.DISPATCHER, candidate, viewportHeight);
-        }
     }
 }
