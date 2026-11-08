@@ -10,10 +10,6 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
 
-import io.github.brooswitminecraft.dynamicvehicles.ClientConfig;
-import io.github.brooswitminecraft.dynamicvehicles.hud.CountdownFormat;
-import io.github.brooswitminecraft.dynamicvehicles.hud.LegacyHudVisibility;
-
 /**
  * MINECRAFT-110 AC4: the persistent HUD element shown while a contract is
  * active - destination direction, remaining distance, remaining time.
@@ -29,7 +25,7 @@ public final class ContractHudOverlay implements LayeredDraw.Layer {
     @Override
     public void render(GuiGraphics graphics, DeltaTracker deltaTracker) {
         DeliveryHudPayload hud = ClientContractHud.current();
-        if (!LegacyHudVisibility.shouldRender(ClientConfig.SHOW_LEGACY_CONTRACT_HUD.get(), hud.active())) {
+        if (!LegacyHudVisibility.shouldRender(DispatcherClientConfig.SHOW_LEGACY_CONTRACT_HUD.get(), hud.active())) {
             return;
         }
         Minecraft minecraft = Minecraft.getInstance();

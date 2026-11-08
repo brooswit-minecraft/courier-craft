@@ -11,10 +11,16 @@ contracts, pillager ambushes, and the contract HUD/waypoint.
 
 ## Install / upgrade pairing
 
-Runs standalone for gameplay. The contract HUD/waypoint overlay alone
-requires Dynamic Vehicles `[0.82.0,)` installed too (client-only), since it
-deliberately keeps sharing that mod's existing mission-waypoint coexistence
-with Pathfinder instead of forking an independent copy.
+Runs fully standalone — no dependency on Dynamic Vehicles or any other mod.
+A required or optional dependency on it was tried and dropped: Dynamic
+Vehicles itself requires a licensed physics companion and a separately
+released terrain mod, so pulling it in transitively (even just to reuse its
+HUD rendering) made this mod refuse to load without those too, confirmed by
+CI. See `ContractWaypointOverlay`'s own javadoc for the resulting known
+limitation: when both mods are installed together, Dispatcher's and
+Pathfinder's waypoint markers no longer coordinate overlap avoidance with
+each other (each mod now keeps its own independent copy of that layout
+logic) — a candidate for a follow-up ticket, not solved here.
 
 An existing world that placed a Dispatch Board, spawned a Dispatcher
 villager, or saved a delivery contract under the pre-split Dynamic Vehicles

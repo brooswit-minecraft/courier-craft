@@ -20,6 +20,7 @@ import io.github.brooswitminecraft.couriercraft.dispatcher.ContractWaypointOverl
 import io.github.brooswitminecraft.couriercraft.dispatcher.DeliveryHudPayload;
 import io.github.brooswitminecraft.couriercraft.dispatcher.DispatchBoardBlockEntities;
 import io.github.brooswitminecraft.couriercraft.dispatcher.DispatcherBlocks;
+import io.github.brooswitminecraft.couriercraft.dispatcher.DispatcherClientConfig;
 import io.github.brooswitminecraft.couriercraft.dispatcher.DispatcherInteractionHandler;
 import io.github.brooswitminecraft.couriercraft.dispatcher.DispatcherOfferAcceptPayload;
 import io.github.brooswitminecraft.couriercraft.dispatcher.DispatcherOfferConfig;
@@ -53,6 +54,7 @@ public class CourierCraftMod {
 
     public CourierCraftMod(IEventBus modEventBus, ModContainer modContainer) {
         modContainer.registerConfig(ModConfig.Type.SERVER, DispatcherOfferConfig.SPEC);
+        modContainer.registerConfig(ModConfig.Type.CLIENT, DispatcherClientConfig.SPEC);
 
         DispatcherBlocks.BLOCKS.register(modEventBus);
         DispatcherBlocks.ITEMS.register(modEventBus);

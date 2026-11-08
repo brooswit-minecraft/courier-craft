@@ -23,18 +23,3 @@ description='''Dispatcher-driven delivery contracts, extracted from Dynamic Vehi
     versionRange="${minecraft_version_range}"
     ordering="NONE"
     side="BOTH"
-
-# Required, CLIENT only: everything else in this mod (blocks, villager, menus, contracts,
-# ambushes) is fully standalone. Only the Dispatcher HUD/waypoint overlay (dispatcher/
-# ContractHudOverlay, dispatcher/ContractWaypointOverlay) deliberately keeps reusing Dynamic
-# Vehicles' existing shared mission-marker rendering/coexistence kernel (hud.MissionWaypointLayout
-# and friends) that Pathfinder's own waypoint also renders through, rather than forking an
-# independent copy that would silently stop coordinating with Pathfinder's marker when both mods
-# are installed together -- MINECRAFT-493 review (comment 52304). This is the "minimal
-# well-defined integration boundary" the ticket allows for, not a general dependency.
-[[dependencies.${mod_id}]]
-    modId="dynamicvehicles"
-    type="required"
-    versionRange="[0.82.0,)"
-    ordering="AFTER"
-    side="CLIENT"
