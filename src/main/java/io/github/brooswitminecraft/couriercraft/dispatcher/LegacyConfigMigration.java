@@ -1,10 +1,13 @@
 package io.github.brooswitminecraft.couriercraft.dispatcher;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import com.electronwill.nightconfig.core.Config;
 import com.electronwill.nightconfig.core.file.FileConfig;
+import com.electronwill.nightconfig.toml.TomlFormat;
 
 import io.github.brooswitminecraft.couriercraft.CourierCraftMod;
 
@@ -57,9 +60,16 @@ public final class LegacyConfigMigration {
             }
             boolean legacyValue = legacyConfig.get(LEGACY_CLIENT_KEY);
             Files.createDirectories(target.getParent());
-            try (FileConfig newConfig = FileConfig.of(target)) {
-                newConfig.set(NEW_CLIENT_KEY, legacyValue);
-                newConfig.save();
+            // Deliberately NOT FileConfig.of(target).set(...).save(): confirmed (standalone JVM
+            // reproduction, since this sourceSet can't run NeoForge) that in night-config 3.8.3, a
+            // FileConfig backed by a file that doesn't exist yet silently fails to flush its first
+            // save() -- the in-memory mutation is real (entrySet() shows it) but nothing ever
+            // reaches disk, even after an explicit load(). Writing through the format's own
+            // writer directly has no such issue.
+            Config fresh = TomlFormat.newConfig();
+            fresh.set(NEW_CLIENT_KEY, legacyValue);
+            try (OutputStream out = Files.newOutputStream(target)) {
+                TomlFormat.instance().createWriter().write(fresh, out);
             }
         } catch (Exception e) {
             CourierCraftMod.LOGGER.warn(
