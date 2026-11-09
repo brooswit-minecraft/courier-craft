@@ -27,6 +27,7 @@ import io.github.brooswitminecraft.couriercraft.dispatcher.DispatcherOfferConfig
 import io.github.brooswitminecraft.couriercraft.dispatcher.DispatcherOfferMenus;
 import io.github.brooswitminecraft.couriercraft.dispatcher.DispatcherPoiTypes;
 import io.github.brooswitminecraft.couriercraft.dispatcher.DispatcherProfession;
+import io.github.brooswitminecraft.couriercraft.dispatcher.LegacyConfigMigration;
 import io.github.brooswitminecraft.couriercraft.dispatcher.PillagerAmbushHandler;
 
 /**
@@ -53,6 +54,12 @@ public class CourierCraftMod {
     public static final String LEGACY_REGISTRY_NAMESPACE = "dynamicvehicles";
 
     public CourierCraftMod(IEventBus modEventBus, ModContainer modContainer) {
+        DynamicVehiclesCompatibility.verify();
+
+        java.nio.file.Path configDir = net.neoforged.fml.loading.FMLPaths.CONFIGDIR.get();
+        LegacyConfigMigration.migrateServerConfig(configDir);
+        LegacyConfigMigration.migrateClientConfig(configDir);
+
         modContainer.registerConfig(ModConfig.Type.SERVER, DispatcherOfferConfig.SPEC);
         modContainer.registerConfig(ModConfig.Type.CLIENT, DispatcherClientConfig.SPEC);
 

@@ -43,24 +43,56 @@ for the fail-closed guard, including an explicit check that both
 `UpgradeCompatibilityGameTests` methods specifically ran).
 
 **Coinstalled coordination, hosted proof (MINECRAFT-493 review comments
-52327/52328/52330):** `ContractWaypointOverlayCoinstalledTest` (in the
-`test` sourceSet) puts Dynamic Vehicles' real jar on the plain JUnit test
-classpath only — a `test` task never goes through NeoForge's mod loader at
-all, so this carries none of the "tries to load it as a mod, needs Sable/
-dynamic-terrain" risk the earlier required-dependency attempt hit on the
-main runtime classpath — and calls `ContractWaypointOverlay`'s own bridge
-directly against Dynamic Vehicles' real `hud.MissionWaypointLayout`. It
-proves, with the real production code path: a Dispatcher reservation made
-through the bridge and a Pathfinder reservation made through Dynamic
+52327/52328/52330, 52345, 52552, 52567):** `ContractWaypointOverlayCoinstalledTest`
+(in the `test` sourceSet) puts Dynamic Vehicles' real jar on the plain
+JUnit test classpath only — a `test` task never goes through NeoForge's
+mod loader at all, so this carries none of the "tries to load it as a mod,
+needs Sable/dynamic-terrain" risk the earlier required-dependency attempt
+hit on the main runtime classpath — and calls `ContractWaypointOverlay`'s
+own bridge directly against Dynamic Vehicles' real `hud.MissionWaypointLayout`.
+It proves, with the real production code path: a Dispatcher reservation
+made through the bridge and a Pathfinder reservation made through Dynamic
 Vehicles' own API never overlap, a shared bottom-edge placement resolves
 correctly, and clearing the Dispatcher slot through the bridge releases it
-for Pathfinder — the exact three behaviors reviewers asked to see
-demonstrated. What this does NOT cover: an actual two-mod NeoForge
-bootstrap/class-loading run (both mods really mod-loaded together, the way
-a true client-acceptance job like dynamic-vehicles' own would) — that
-remains unverified here; flagging as a further candidate rather than
-building a full client-acceptance harness under this ticket's bounded
-scope.
+for Pathfinder.
+
+Beyond that logic-level proof, the paired dynamic-vehicles PR #212 also
+runs a hosted `coinstalled-acceptance` CI job: a real NeoForge client, with
+both mods' actual jars mod-loaded together (not a JUnit proxy), confirmed
+green at dynamic-vehicles run
+[42645429079](https://github.com/brooswit-minecraft/dynamic-vehicles/actions/runs/42645429079).
+It verified `ModList` reports this mod loaded, the Dispatcher and
+Pathfinder markers reserve non-overlapping, bottom-edge-stacked slots
+through the real bridge, and clearing a contract releases the Dispatcher's
+slot after real rendered frames.
+
+**Version-pairing and config-upgrade handshake (review comment 52567,
+findings 1–2):** a declared `neoforge.mods.toml` version range alone
+cannot tell this mod whether an installed Dynamic Vehicles has actually
+gone through the Dispatcher extraction — Dynamic Vehicles' real released
+0.82.1 is pre-split and still registers the same `dynamicvehicles`
+Dispatcher/Dispatch Board/menu/payload IDs this mod now also registers,
+and the real post-split release's version number isn't known until the
+external release-gate assigns it at merge time. `DynamicVehiclesCompatibility`
+checks Dynamic Vehicles' own `CourierCraftBridgeSupport` marker class via
+reflection at mod construction instead, and fails loudly with an
+actionable message (not an opaque duplicate-registry-id crash) if it's
+absent or declares an incompatible schema — see `DynamicVehiclesBridgeSchemaTest`,
+which proves this against Dynamic Vehicles' real pre-split 0.82.1 jar.
+`LegacyConfigMigration` similarly copies an existing
+`dynamicvehicles-dispatcher-server.toml`/`delivery.showLegacyContractHud`
+(pre-split filenames/keys) forward into this mod's own config on first
+boot, so existing world/admin tuning survives the split instead of
+silently resetting to defaults — see `LegacyConfigMigrationTest`.
+
+**Exact supported upgrade pair:** any Dynamic Vehicles build whose jar
+contains `CourierCraftBridgeSupport` with a `SCHEMA_VERSION` this mod
+recognizes (currently `1`) — in practice, the first Dynamic Vehicles
+release built from a tree containing PR #212 or later. Dynamic Vehicles
+0.82.1 and any earlier release are pre-split and are correctly rejected at
+mod construction with an actionable error, not merely a version-range
+mismatch. Running without Dynamic Vehicles installed at all remains fully
+supported (this mod's own standalone kernel copy renders the marker).
 
 Root cause of the earlier "zero `@GameTest` methods discovered" CI failure,
 for the record: NeoForge selects a `@GameTest` by its *effective*
