@@ -31,7 +31,7 @@ class LegacyConfigMigrationTest {
         try (FileConfig config = FileConfig.of(migrated)) {
             config.load();
             assertEquals(7, config.getInt("noviceMaxRing"));
-            assertEquals(12.5, config.getDouble("rewardBase"));
+            assertEquals(12.5, ((Number) config.get("rewardBase")).doubleValue());
         }
     }
 
