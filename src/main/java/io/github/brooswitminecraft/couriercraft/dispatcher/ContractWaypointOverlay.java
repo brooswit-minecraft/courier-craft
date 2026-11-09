@@ -39,6 +39,10 @@ public final class ContractWaypointOverlay implements LayeredDraw.Layer {
     @Override
     public void render(GuiGraphics graphics, DeltaTracker deltaTracker) {
         DeliveryHudPayload hud = ClientContractHud.current();
+        // MINECRAFT-493 temporary diagnostic (coinstalled acceptance clear-after-inactive
+        // investigation): remove once the real cause is found.
+        io.github.brooswitminecraft.couriercraft.CourierCraftMod.LOGGER.info(
+                "MINECRAFT493_DIAG render() hud={} dynamicVehiclesLoaded={}", hud, dynamicVehiclesLoaded());
         Minecraft minecraft = Minecraft.getInstance();
         if (!hud.active() || minecraft.player == null || minecraft.level == null) {
             clear();
@@ -64,6 +68,8 @@ public final class ContractWaypointOverlay implements LayeredDraw.Layer {
     }
 
     private void clear() {
+        io.github.brooswitminecraft.couriercraft.CourierCraftMod.LOGGER.info(
+                "MINECRAFT493_DIAG clear() dynamicVehiclesLoaded={}", dynamicVehiclesLoaded());
         if (dynamicVehiclesLoaded()) {
             DynamicVehiclesWaypointState.clear();
         } else {
