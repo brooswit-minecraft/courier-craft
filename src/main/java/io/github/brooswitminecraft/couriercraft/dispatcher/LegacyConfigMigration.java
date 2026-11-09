@@ -7,6 +7,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.electronwill.nightconfig.core.Config;
 import com.electronwill.nightconfig.core.file.FileConfig;
 import com.electronwill.nightconfig.toml.TomlFormat;
@@ -30,6 +33,17 @@ import io.github.brooswitminecraft.couriercraft.CourierCraftMod;
  * create {@link #NEW_SERVER_FILE}/{@link #NEW_CLIENT_FILE} from the spec's defaults first.
  */
 public final class LegacyConfigMigration {
+    // A dedicated logger, NOT CourierCraftMod.LOGGER: that field's own type is fine, but merely
+    // loading the CourierCraftMod class to read it also links every other type CourierCraftMod's
+    // own methods reference (ModContainer, IEventBus, registry events, ...), none of which exist
+    // on the plain JUnit test classpath -- this is the same "Minecraft-light class must never
+    // reference a Minecraft-heavy class" rule dynamic-vehicles' own VehicleSpecOverrides follows
+    // for the identical reason. Confirmed the hard way: the forced-write-failure JUnit tests
+    // below are the first ones in this class's history to actually execute a warn() call, and
+    // doing so via CourierCraftMod.LOGGER threw NoClassDefFoundError on that classpath. LogUtils
+    // itself is nothing more than LoggerFactory.getLogger with a fixed binding, so this is
+    // identical logging, just without the link.
+    private static final Logger LOGGER = LoggerFactory.getLogger("couriercraft/LegacyConfigMigration");
     static final String LEGACY_SERVER_FILE = "dynamicvehicles-dispatcher-server.toml";
     static final String LEGACY_CLIENT_FILE = "dynamicvehicles-client.toml";
     static final String NEW_SERVER_FILE = "couriercraft-server.toml";
@@ -144,7 +158,7 @@ public final class LegacyConfigMigration {
             Files.createDirectories(perWorldDir);
             Files.createFile(marker);
         } catch (IOException e) {
-            CourierCraftMod.LOGGER.warn("Could not write per-world Dispatcher config migration marker at {}", marker, e);
+            LOGGER.warn("Could not write per-world Dispatcher config migration marker at {}", marker, e);
         }
     }
 
@@ -194,7 +208,7 @@ public final class LegacyConfigMigration {
                     // ValueSpec#test is checked explicitly before applying (review 52630 finding 2).
                     Object converted = value.getRaw(legacyConfig, path, value::getDefault);
                     if (!value.getSpec().test(converted)) {
-                        CourierCraftMod.LOGGER.warn(
+                        LOGGER.warn(
                                 "Legacy per-world Dispatcher config value for {} ({}) failed validation; keeping the current value",
                                 key, converted);
                         continue;
@@ -203,7 +217,7 @@ public final class LegacyConfigMigration {
                     pendingLiveApplies.add(() -> value.set(converted));
                     any = true;
                 } catch (Exception e) {
-                    CourierCraftMod.LOGGER.warn("Could not apply legacy per-world override for Dispatcher config field {}", field.getName(), e);
+                    LOGGER.warn("Could not apply legacy per-world override for Dispatcher config field {}", field.getName(), e);
                 }
             }
             if (any) {
@@ -212,7 +226,7 @@ public final class LegacyConfigMigration {
             pendingLiveApplies.forEach(Runnable::run);
             return true;
         } catch (Exception e) {
-            CourierCraftMod.LOGGER.warn(
+            LOGGER.warn(
                     "Could not read or publish legacy per-world Dispatcher server config from {}; will retry on the next server start",
                     legacyFile, e);
             return false;
@@ -271,7 +285,7 @@ public final class LegacyConfigMigration {
             // silently losing the legacy value with no retry.
             publishAtomically(fresh, target);
         } catch (Exception e) {
-            CourierCraftMod.LOGGER.warn(
+            LOGGER.warn(
                     "Could not migrate legacy Dispatcher client config from {}; falling back to defaults", legacy, e);
         }
     }
@@ -293,7 +307,7 @@ public final class LegacyConfigMigration {
             Files.copy(legacy, tmp);
             Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException e) {
-            CourierCraftMod.LOGGER.warn(
+            LOGGER.warn(
                     "Could not migrate legacy Dispatcher server config from {}; falling back to defaults", legacy, e);
         } finally {
             try {

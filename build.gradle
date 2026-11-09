@@ -137,6 +137,10 @@ dependencies {
     // moddev-config.json) so LegacyConfigMigrationTest exercises the identical TOML read/write
     // behavior production code gets at runtime, not a possibly-different one.
     testImplementation "com.electronwill.night-config:toml:3.8.3"
+    // LegacyConfigMigration logs via its own slf4j Logger (not CourierCraftMod.LOGGER -- see that
+    // class's own comment on why), which this test sourceSet needs explicitly since nothing else
+    // here pulls it in transitively. Pinned to the exact version NeoForge 21.1.250 bundles.
+    testImplementation "org.slf4j:slf4j-api:2.0.9"
 }
 
 test {
