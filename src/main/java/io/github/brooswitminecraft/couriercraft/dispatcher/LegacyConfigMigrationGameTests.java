@@ -194,4 +194,76 @@ public final class LegacyConfigMigrationGameTests {
             }
         }
     }
+
+    @GameTest(templateNamespace = "dynamicvehicles", template = "dispatch_profession",
+            batch = "perWorldMigrationRetriesAfterATargetWriteFailure")
+    public static void perWorldMigrationRetriesAfterATargetWriteFailure(GameTestHelper helper) {
+        MinecraftServer server = helper.getLevel().getServer();
+        Path perWorldDir = server.getWorldPath(new LevelResource("serverconfig"));
+        Path legacy = perWorldDir.resolve(LegacyConfigMigration.LEGACY_SERVER_FILE);
+        Path perWorldCourier = perWorldDir.resolve(LegacyConfigMigration.NEW_SERVER_FILE);
+        Path marker = perWorldDir.resolve(LegacyConfigMigration.PER_WORLD_MIGRATION_MARKER);
+        int originalMaxRing = DispatcherOfferConfig.NOVICE_MAX_RING.get();
+        int migratedValue = originalMaxRing == 17 ? 23 : 17;
+        boolean madeReadOnly = false;
+
+        try {
+            Files.createDirectories(perWorldDir);
+            Files.deleteIfExists(marker);
+            Files.deleteIfExists(perWorldCourier);
+            Files.writeString(legacy, "noviceMaxRing = " + migratedValue + "\n");
+
+            // Force the target write itself to fail (review comment 52646's exact concern,
+            // distinct from a legacy-read failure): make the per-world directory read-only so
+            // creating the sibling temp file throws, before any bytes of a final file could ever
+            // be written -- proving the publish step itself is all-or-nothing, not just the read.
+            madeReadOnly = perWorldDir.toFile().setWritable(false);
+            helper.assertTrue(madeReadOnly, "test setup: must be able to make the per-world directory read-only on this platform");
+
+            LegacyConfigMigration.migratePerWorldServerConfig(server);
+
+            helper.assertTrue(!Files.exists(marker), "a failed target write must not settle");
+            helper.assertTrue(!Files.exists(perWorldCourier),
+                    "a failed target write must leave no final file behind at all -- partial or otherwise");
+            helper.assertTrue(DispatcherOfferConfig.NOVICE_MAX_RING.get() == originalMaxRing,
+                    "a failed target write must not have mutated the live config either -- live values are only applied after a successful publish");
+
+            perWorldDir.toFile().setWritable(true);
+            madeReadOnly = false;
+
+            // Simulate the next server start on the same world: the directory is writable again.
+            LegacyConfigMigration.migratePerWorldServerConfig(server);
+
+            helper.assertTrue(DispatcherOfferConfig.NOVICE_MAX_RING.get() == migratedValue,
+                    "a retried migration once the target is writable again must succeed and apply");
+            helper.assertTrue(Files.exists(marker), "a successful retry must settle");
+            helper.assertTrue(Files.exists(perWorldCourier), "a successful retry must write the per-world file");
+
+            helper.succeed();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        } finally {
+            if (madeReadOnly) {
+                perWorldDir.toFile().setWritable(true);
+            }
+            DispatcherOfferConfig.NOVICE_MAX_RING.set(originalMaxRing);
+            try {
+                Files.deleteIfExists(legacy);
+                Files.deleteIfExists(perWorldCourier);
+                Files.deleteIfExists(marker);
+                try (var stray = Files.list(perWorldDir)) {
+                    stray.filter(p -> p.getFileName().toString().startsWith(LegacyConfigMigration.NEW_SERVER_FILE + ".tmp-"))
+                            .forEach(p -> {
+                                try {
+                                    Files.deleteIfExists(p);
+                                } catch (IOException ignored) {
+                                    // best-effort cleanup only
+                                }
+                            });
+                }
+            } catch (IOException ignored) {
+                // best-effort cleanup only
+            }
+        }
+    }
 }
