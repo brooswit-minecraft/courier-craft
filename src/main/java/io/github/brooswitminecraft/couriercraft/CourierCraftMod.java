@@ -73,6 +73,7 @@ public class CourierCraftMod {
         modEventBus.addListener(this::addCreative);
         modEventBus.addListener(this::registerPayloads);
 
+        NeoForge.EVENT_BUS.addListener(LegacyConfigMigration::onServerAboutToStart);
         NeoForge.EVENT_BUS.addListener(DispatcherInteractionHandler::onEntityInteract);
         NeoForge.EVENT_BUS.addListener(ContractTickHandler::onServerTick);
         NeoForge.EVENT_BUS.addListener(ContractTickHandler::onPlayerLoggedIn);
