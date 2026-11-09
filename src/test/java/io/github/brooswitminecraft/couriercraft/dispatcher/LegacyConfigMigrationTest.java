@@ -91,18 +91,25 @@ class LegacyConfigMigrationTest {
     // (decidePerWorldLegacyFile) is Minecraft-free and directly testable here; the NeoForge-
     // dependent conversion/validation/application onto the live ConfigValue/MinecraftServer is
     // covered separately by LegacyConfigMigrationGameTests, which a plain JUnit test cannot reach.
+    //
+    // NeoForge's own per-world override is opt-in (confirmed by reading ConfigTracker#
+    // resolveBasePath directly): a per-world couriercraft-server.toml is used only if it ALREADY
+    // exists when the world's config loads -- it is never auto-created from the global default.
+    // So the precedence rule (review 52630 finding 1) is simply: any existing per-world Courier
+    // file -- real admin customization or an earlier migration run, no way to tell apart and no
+    // need to -- is already this world's correct, owned config and is never touched; the legacy
+    // override applies only when no per-world Courier file exists at all yet.
 
     @Test
     void perWorldOverrideIsReadWhenLegacyFileExistsInThatWorldOnly(@TempDir Path worldsRoot) throws IOException {
         Path worldA = Files.createDirectory(worldsRoot.resolve("world-a"));
         Path worldB = Files.createDirectory(worldsRoot.resolve("world-b"));
-        Path globalServerFile = worldsRoot.resolve("global-" + LegacyConfigMigration.NEW_SERVER_FILE);
         Files.writeString(worldA.resolve(LegacyConfigMigration.LEGACY_SERVER_FILE), "noviceMaxRing = 3\n");
         // worldB has no legacy per-world override at all -- the "global fallback" case: nothing
-        // world-specific to migrate, so NeoForge's own already-correct global-default copy stands.
+        // world-specific to migrate, so this world keeps using the global file as usual.
 
-        Optional<Path> legacyA = LegacyConfigMigration.decidePerWorldLegacyFile(worldA, globalServerFile);
-        Optional<Path> legacyB = LegacyConfigMigration.decidePerWorldLegacyFile(worldB, globalServerFile);
+        Optional<Path> legacyA = LegacyConfigMigration.decidePerWorldLegacyFile(worldA);
+        Optional<Path> legacyB = LegacyConfigMigration.decidePerWorldLegacyFile(worldB);
 
         assertEquals(worldA.resolve(LegacyConfigMigration.LEGACY_SERVER_FILE), legacyA.orElseThrow(),
                 "world A's own legacy override must be decided");
@@ -113,14 +120,13 @@ class LegacyConfigMigrationTest {
     void perWorldOverridesDoNotCrossContaminateBetweenTwoDistinctWorlds(@TempDir Path worldsRoot) throws IOException {
         Path worldA = Files.createDirectory(worldsRoot.resolve("world-a"));
         Path worldB = Files.createDirectory(worldsRoot.resolve("world-b"));
-        Path globalServerFile = worldsRoot.resolve("global-" + LegacyConfigMigration.NEW_SERVER_FILE);
         Path legacyA = worldA.resolve(LegacyConfigMigration.LEGACY_SERVER_FILE);
         Path legacyB = worldB.resolve(LegacyConfigMigration.LEGACY_SERVER_FILE);
         Files.writeString(legacyA, "noviceMaxRing = 3\n");
         Files.writeString(legacyB, "noviceMaxRing = 9\n");
 
-        Optional<Path> decidedA = LegacyConfigMigration.decidePerWorldLegacyFile(worldA, globalServerFile);
-        Optional<Path> decidedB = LegacyConfigMigration.decidePerWorldLegacyFile(worldB, globalServerFile);
+        Optional<Path> decidedA = LegacyConfigMigration.decidePerWorldLegacyFile(worldA);
+        Optional<Path> decidedB = LegacyConfigMigration.decidePerWorldLegacyFile(worldB);
 
         assertEquals(legacyA, decidedA.orElseThrow(), "world A must get its own legacy file, not world B's");
         assertEquals(legacyB, decidedB.orElseThrow(), "world B must get its own legacy file, not world A's");
@@ -129,25 +135,23 @@ class LegacyConfigMigrationTest {
     @Test
     void perWorldMigrationSettlesPermanentlyAfterFirstCall(@TempDir Path worldsRoot) throws IOException {
         Path worldDir = Files.createDirectory(worldsRoot.resolve("world"));
-        Path globalServerFile = worldsRoot.resolve("global-" + LegacyConfigMigration.NEW_SERVER_FILE);
         Files.writeString(worldDir.resolve(LegacyConfigMigration.LEGACY_SERVER_FILE), "noviceMaxRing = 3\n");
 
-        Optional<Path> firstCall = LegacyConfigMigration.decidePerWorldLegacyFile(worldDir, globalServerFile);
+        Optional<Path> firstCall = LegacyConfigMigration.decidePerWorldLegacyFile(worldDir);
         assertTrue(firstCall.isPresent());
 
         // Simulate an admin changing their mind through Courier's own per-world config after the
         // first server start, then the server restarting: the legacy file is still sitting there
         // with its old value, but must never be re-applied and clobber the admin's later choice.
-        Optional<Path> secondCall = LegacyConfigMigration.decidePerWorldLegacyFile(worldDir, globalServerFile);
+        Optional<Path> secondCall = LegacyConfigMigration.decidePerWorldLegacyFile(worldDir);
         assertTrue(secondCall.isEmpty(), "a world already settled on its first start must never be re-migrated");
     }
 
     @Test
     void perWorldMigrationSettlesEvenWithNoLegacyOverrideToMigrate(@TempDir Path worldsRoot) {
         Path worldDir = worldsRoot.resolve("world");
-        Path globalServerFile = worldsRoot.resolve("global-" + LegacyConfigMigration.NEW_SERVER_FILE);
 
-        Optional<Path> decided = LegacyConfigMigration.decidePerWorldLegacyFile(worldDir, globalServerFile);
+        Optional<Path> decided = LegacyConfigMigration.decidePerWorldLegacyFile(worldDir);
 
         assertTrue(decided.isEmpty());
         assertTrue(Files.exists(worldDir.resolve(LegacyConfigMigration.PER_WORLD_MIGRATION_MARKER)),
@@ -155,41 +159,35 @@ class LegacyConfigMigrationTest {
     }
 
     // Coexistence/precedence (review comment 52630, finding 1): a per-world Courier config that
-    // already diverges from the current global default means a genuine prior customization for
-    // this specific world -- never silently overwritten by a legacy value, even if a legacy file
-    // happens to also be sitting in that same per-world folder.
+    // already exists at all -- a real admin customization, or an earlier migration run -- must
+    // never be overwritten by a legacy value, even if a legacy file is also sitting in that same
+    // per-world folder.
 
     @Test
-    void perWorldLegacyOverrideIsSkippedWhenAGenuinePerWorldCourierCustomizationAlreadyExists(@TempDir Path worldsRoot)
-            throws IOException {
+    void perWorldLegacyOverrideIsSkippedWhenAPerWorldCourierFileAlreadyExists(@TempDir Path worldsRoot) throws IOException {
         Path worldDir = Files.createDirectory(worldsRoot.resolve("world"));
-        Path globalServerFile = worldsRoot.resolve(LegacyConfigMigration.NEW_SERVER_FILE);
-        Files.writeString(globalServerFile, "noviceMaxRing = 1\n");
         Files.writeString(worldDir.resolve(LegacyConfigMigration.LEGACY_SERVER_FILE), "noviceMaxRing = 3\n");
-        // This world's own Courier file already diverges from the global default -- a real,
-        // pre-existing customization (an admin's deliberate edit, or an earlier marker-less run).
+        // This world already has its own Courier file -- NeoForge's own resolveBasePath has
+        // already bound this world to it; a real, pre-existing customization (an admin's
+        // deliberate per-world edit, or an earlier run of this migration).
         Files.writeString(worldDir.resolve(LegacyConfigMigration.NEW_SERVER_FILE), "noviceMaxRing = 42\n");
 
-        Optional<Path> decided = LegacyConfigMigration.decidePerWorldLegacyFile(worldDir, globalServerFile);
+        Optional<Path> decided = LegacyConfigMigration.decidePerWorldLegacyFile(worldDir);
 
         assertTrue(decided.isEmpty(),
-                "a genuine pre-existing per-world Courier customization must never be overwritten by a legacy value");
+                "a pre-existing per-world Courier config file must never be overwritten by a legacy value");
     }
 
     @Test
-    void perWorldLegacyOverrideAppliesWhenThePerWorldCourierFileStillMatchesTheGlobalDefault(@TempDir Path worldsRoot)
-            throws IOException {
+    void perWorldLegacyOverrideAppliesWhenNoPerWorldCourierFileExistsYet(@TempDir Path worldsRoot) throws IOException {
         Path worldDir = Files.createDirectory(worldsRoot.resolve("world"));
-        Path globalServerFile = worldsRoot.resolve(LegacyConfigMigration.NEW_SERVER_FILE);
-        Files.writeString(globalServerFile, "noviceMaxRing = 1\n");
         Files.writeString(worldDir.resolve(LegacyConfigMigration.LEGACY_SERVER_FILE), "noviceMaxRing = 3\n");
-        // This world's own Courier file is byte-identical to the current global default -- exactly
-        // what NeoForge's own first-start auto-copy produces when nothing has customized it yet.
-        Files.writeString(worldDir.resolve(LegacyConfigMigration.NEW_SERVER_FILE), "noviceMaxRing = 1\n");
+        // No per-world Courier file at all yet -- this world is still bound to the global file;
+        // the legacy override is free to apply.
 
-        Optional<Path> decided = LegacyConfigMigration.decidePerWorldLegacyFile(worldDir, globalServerFile);
+        Optional<Path> decided = LegacyConfigMigration.decidePerWorldLegacyFile(worldDir);
 
         assertTrue(decided.isPresent(),
-                "a per-world Courier file indistinguishable from a fresh global-default copy is safe to override with the legacy value");
+                "a world with no per-world Courier file yet is safe to migrate from its legacy per-world override");
     }
 }

@@ -37,13 +37,17 @@ public final class LegacyConfigMigration {
     static final String LEGACY_CLIENT_KEY = "delivery.showLegacyContractHud";
     static final String NEW_CLIENT_KEY = "showLegacyContractHud";
     /**
-     * NeoForge gives SERVER-type configs (only) a per-world override directory (see {@code
-     * ServerLifecycleHooks#getServerConfigPath}): {@code <world>/serverconfig/<file>} takes
-     * precedence over the global {@code config/<file>} for that world specifically, for as long
-     * as that world exists. A per-world legacy override is therefore a SEPARATE thing from the
-     * global one {@link #migrateServerConfig} already handles, and must be migrated independently
-     * per world (review comment 52602/52604, finding raised by John Winstead and confirmed by
-     * self-review).
+     * NeoForge gives SERVER-type configs (only) an OPT-IN per-world override directory (see
+     * {@code ServerLifecycleHooks#getServerConfigPath} and {@code
+     * ConfigTracker#resolveBasePath}, read directly from a locally-cached NeoForge artifact on
+     * this host to confirm the real behavior rather than assume it): {@code
+     * <world>/serverconfig/<file>} is used ONLY if it already exists at the moment this world's
+     * config loads; NeoForge never auto-copies the global default into a per-world file -- if no
+     * per-world file exists, the config simply binds to the GLOBAL file directly for that world,
+     * for the rest of that session. A per-world legacy override is therefore a SEPARATE thing
+     * from the global one {@link #migrateServerConfig} already handles, and must be migrated
+     * independently per world (review comment 52602/52604, finding raised by John Winstead and
+     * confirmed by self-review).
      */
     static final String PER_WORLD_MIGRATION_MARKER = ".couriercraft-legacy-migration-settled";
 
@@ -62,32 +66,35 @@ public final class LegacyConfigMigration {
      * Fires on {@link ServerAboutToStartEvent} -- the same event, for the same reason, the
      * pre-existing {@code VehicleSpecOverrides} per-car config load uses in dynamic-vehicles: it
      * fires before any level loads, but (unlike that case) it ALSO fires strictly after NeoForge's
-     * own {@code ServerLifecycleHooks.handleServerAboutToStart} has already synchronously called
-     * {@code ConfigTracker.loadConfigs(SERVER, ...)} for this world -- by the time this listener
-     * runs, this mod's own per-world {@code couriercraft-server.toml} already exists (NeoForge
-     * creates it from the global default the first time a world is started) and its values are
-     * already loaded into the live {@link DispatcherOfferConfig#SPEC}. Overwriting the per-world
-     * FILE from here would therefore NOT take effect for the live config this session -- the
-     * override must instead go through {@link ModConfigSpec.ConfigValue#set} on the already-live
-     * spec (the standard, officially-supported way to change a loaded config value at runtime),
-     * followed by one {@code SPEC.save()}.
+     * own {@code ServerLifecycleHooks.handleServerAboutToStart} has already synchronously decided,
+     * via {@code ConfigTracker.resolveBasePath}, which file this world's SERVER config is bound
+     * to for the rest of this session: this world's own per-world file if one already existed at
+     * that moment, otherwise the shared GLOBAL file -- {@code ConfigValue#save} always persists to
+     * THAT file. If this world had no per-world file yet, calling {@code save()} after applying a
+     * legacy override would corrupt the shared global default for every other world, so this
+     * never calls {@code save()} in that case: it writes the per-world file directly instead (so
+     * the NEXT start of this same world binds to it correctly) and separately applies the value
+     * to the live cache via {@code ConfigValue#set} alone, so THIS session's behavior is already
+     * correct without waiting for a restart.
      */
     public static void onServerAboutToStart(ServerAboutToStartEvent event) {
         migratePerWorldServerConfig(event.getServer());
     }
 
     static void migratePerWorldServerConfig(MinecraftServer server) {
-        Path perWorldDir = server.getWorldPath(new LevelResource("serverconfig"));
-        Path globalServerFile = net.neoforged.fml.loading.FMLPaths.CONFIGDIR.get().resolve(NEW_SERVER_FILE);
-        decidePerWorldLegacyFile(perWorldDir, globalServerFile).ifPresent(LegacyConfigMigration::applyPerWorldOverridesFrom);
+        migratePerWorldServerConfig(server.getWorldPath(new LevelResource("serverconfig")));
+    }
+
+    static void migratePerWorldServerConfig(Path perWorldDir) {
+        decidePerWorldLegacyFile(perWorldDir).ifPresent(legacy -> applyPerWorldOverridesFrom(legacy, perWorldDir.resolve(NEW_SERVER_FILE)));
     }
 
     /**
      * The Minecraft-free decision core: whether this specific world's {@code serverconfig}
-     * directory has an unmigrated legacy override that is actually SAFE to apply, isolated from
-     * the NeoForge-dependent {@code ConfigValue}/{@code MinecraftServer} machinery so it is
-     * directly unit-testable (see {@code LegacyConfigMigrationTest}) against multiple distinct
-     * per-world directories at once, proving no cross-world contamination.
+     * directory has an unmigrated legacy override, isolated from the NeoForge-dependent {@code
+     * ConfigValue}/{@code MinecraftServer} machinery so it is directly unit-testable (see {@code
+     * LegacyConfigMigrationTest}) against multiple distinct per-world directories at once,
+     * proving no cross-world contamination.
      *
      * <p>Settles permanently on the FIRST call for a given world (writes {@link
      * #PER_WORLD_MIGRATION_MARKER}), exactly like {@link #migrateServerConfig}'s own global
@@ -95,24 +102,24 @@ public final class LegacyConfigMigration {
      * couriercraft-server.toml} is never subsequently clobbered by a stale legacy value on a
      * later server restart.
      *
-     * <p><b>Coexistence/precedence (review comment 52630, finding 1):</b> by the time this runs,
-     * NeoForge has already created this world's own {@code couriercraft-server.toml} from the
-     * global default IF none existed. A per-world Courier file that still matches the current
-     * global default byte-for-byte is therefore safe to assume was just freshly synthesized this
-     * way, with no genuine customization yet, and the legacy override may apply. A per-world
-     * Courier file that already DIFFERS from the global default means a real customization
-     * already exists for this specific world (an admin's deliberate edit, or a previous run of an
-     * earlier, marker-less version of this migration) -- that must never be overwritten by a
-     * stale legacy value, so the legacy override is skipped even if a legacy file is present.
+     * <p><b>Coexistence/precedence (review comment 52630, finding 1):</b> since NeoForge's own
+     * per-world override is opt-in (it is used only if it ALREADY exists when the world's config
+     * loads -- never auto-created from the global default), a per-world {@code
+     * couriercraft-server.toml} that already exists at all means NeoForge's own {@code
+     * resolveBasePath} already bound this world to it this session: either a real admin
+     * customization, or an earlier run of this migration (which always writes that exact file --
+     * see {@link #applyPerWorldOverridesFrom}). Either way it is already this world's correct,
+     * owned config and must never be touched; the legacy override applies ONLY when no per-world
+     * Courier file exists yet at all.
      */
-    static Optional<Path> decidePerWorldLegacyFile(Path perWorldDir, Path globalServerFile) {
+    static Optional<Path> decidePerWorldLegacyFile(Path perWorldDir) {
         Path marker = perWorldDir.resolve(PER_WORLD_MIGRATION_MARKER);
         if (Files.exists(marker)) {
             return Optional.empty();
         }
         Path legacy = perWorldDir.resolve(LEGACY_SERVER_FILE);
         Optional<Path> result = Optional.empty();
-        if (Files.exists(legacy) && perWorldCourierSafeToOverride(perWorldDir.resolve(NEW_SERVER_FILE), globalServerFile)) {
+        if (Files.exists(legacy) && !Files.exists(perWorldDir.resolve(NEW_SERVER_FILE))) {
             result = Optional.of(legacy);
         }
         try {
@@ -124,40 +131,23 @@ public final class LegacyConfigMigration {
         return result;
     }
 
-    private static boolean perWorldCourierSafeToOverride(Path perWorldCourierFile, Path globalServerFile) {
-        if (!Files.exists(perWorldCourierFile)) {
-            return true;
-        }
-        if (!Files.exists(globalServerFile)) {
-            // Can't prove the per-world file is an unmodified copy of anything -- conservatively
-            // treat it as a genuine customization and preserve it.
-            return false;
-        }
-        try {
-            return Files.mismatch(perWorldCourierFile, globalServerFile) == -1L;
-        } catch (IOException e) {
-            CourierCraftMod.LOGGER.warn(
-                    "Could not compare per-world Dispatcher config {} against the global default; preserving the per-world file",
-                    perWorldCourierFile, e);
-            return false;
-        }
-    }
-
     /**
-     * Applies a legacy per-world file's values onto the live, already-loaded spec. Each matching
-     * {@code ConfigValue} converts the raw legacy entry through its OWN {@code getRaw} (the same
-     * conversion NeoForge itself uses when loading from disk -- correctly turns a raw TOML string
-     * into an enum constant for {@code EnumValue}, for instance, rather than caching the raw value
-     * untyped) and is applied only if {@code ValueSpec#test} accepts it (range/type validation --
-     * {@code ConfigValue#set} itself performs none). An out-of-range or otherwise invalid legacy
-     * value is logged and skipped, leaving that one field at its current/default value, rather
-     * than corrupting the live cache or aborting the rest of the migration (review comment 52630,
-     * finding 2).
+     * Converts and validates each legacy entry exactly as {@link #applyPerWorldOverridesFrom}
+     * does, then writes a per-world {@code couriercraft-server.toml} containing only the
+     * successfully-converted keys directly (bypassing {@code ConfigValue#save}, which would
+     * target the wrong file at this point -- see this class's {@code
+     * #onServerAboutToStart} javadoc) -- NeoForge's own {@code ModConfigSpec#correct} fills in any
+     * key this doesn't cover from the schema's defaults the next time this exact file is actually
+     * loaded as a real per-world override, the same way a hand-written partial override file
+     * would behave. ALSO applies each converted value to the live cache via {@code ConfigValue#set}
+     * (never {@code #save}) so this session's behavior is correct immediately, without waiting for
+     * a restart to pick up the newly-written file.
      */
-    private static void applyPerWorldOverridesFrom(Path legacyFile) {
+    private static void applyPerWorldOverridesFrom(Path legacyFile, Path perWorldCourierFile) {
         try (FileConfig legacyConfig = FileConfig.of(legacyFile)) {
             legacyConfig.load();
-            boolean changed = false;
+            Config fresh = TomlFormat.newConfig();
+            boolean any = false;
             for (Field field : DispatcherOfferConfig.class.getDeclaredFields()) {
                 if (!ModConfigSpec.ConfigValue.class.isAssignableFrom(field.getType())) {
                     continue;
@@ -171,6 +161,10 @@ public final class LegacyConfigMigration {
                     if (!legacyConfig.contains(key)) {
                         continue;
                     }
+                    // getRaw performs the same conversion NeoForge itself uses when loading from
+                    // disk (correctly turns a raw TOML string into an enum constant for
+                    // EnumValue, for instance); ConfigValue#set performs no validation at all, so
+                    // ValueSpec#test is checked explicitly before applying (review 52630 finding 2).
                     Object converted = value.getRaw(legacyConfig, path, value::getDefault);
                     if (!value.getSpec().test(converted)) {
                         CourierCraftMod.LOGGER.warn(
@@ -178,14 +172,17 @@ public final class LegacyConfigMigration {
                                 key, converted);
                         continue;
                     }
+                    fresh.set(path, converted);
                     value.set(converted);
-                    changed = true;
+                    any = true;
                 } catch (Exception e) {
                     CourierCraftMod.LOGGER.warn("Could not apply legacy per-world override for Dispatcher config field {}", field.getName(), e);
                 }
             }
-            if (changed) {
-                DispatcherOfferConfig.SPEC.save();
+            if (any) {
+                try (OutputStream out = Files.newOutputStream(perWorldCourierFile)) {
+                    TomlFormat.instance().createWriter().write(fresh, out);
+                }
             }
         } catch (Exception e) {
             CourierCraftMod.LOGGER.warn(
