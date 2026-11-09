@@ -24,13 +24,18 @@ import io.github.brooswitminecraft.couriercraft.CourierCraftMod;
 /**
  * One-time, first-boot migration of the Dispatcher's pre-split (MINECRAFT-493) Dynamic Vehicles
  * config into this mod's own files, so existing world/admin tuning is preserved instead of
- * silently reset to Courier Craft's defaults (review comment 52567, finding 2). A no-op whenever
- * this mod's own file already exists (already migrated, or a fresh install with nothing to
- * migrate) or the legacy file is absent (Dynamic Vehicles never installed on this instance, or
- * this value was never customized -- nothing to lose).
+ * silently reset to Courier Craft's defaults (review comment 52567, finding 2). A no-op once
+ * settled (see {@link #GLOBAL_SERVER_MIGRATION_MARKER}/{@link #GLOBAL_CLIENT_MIGRATION_MARKER} --
+ * NOT merely because {@link #NEW_SERVER_FILE}/{@link #NEW_CLIENT_FILE} already exist, which is
+ * NOT a safe completion signal on its own) or whenever the legacy file is absent (Dynamic
+ * Vehicles never installed on this instance, or this value was never customized -- nothing to
+ * lose).
  *
  * <p>Must run before {@link CourierCraftMod}'s own {@code registerConfig} calls, which otherwise
- * create {@link #NEW_SERVER_FILE}/{@link #NEW_CLIENT_FILE} from the spec's defaults first.
+ * create {@link #NEW_SERVER_FILE}/{@link #NEW_CLIENT_FILE} from the spec's defaults first --
+ * {@code registerConfig} itself still runs regardless of whether migration succeeded, failed, or
+ * found nothing to do, which is exactly why target-file existence can no longer be trusted as a
+ * migration-completion signal (review comment 52706).
  */
 public final class LegacyConfigMigration {
     // A dedicated logger, NOT CourierCraftMod.LOGGER: that field's own type is fine, but merely
@@ -64,6 +69,25 @@ public final class LegacyConfigMigration {
      * confirmed by self-review).
      */
     static final String PER_WORLD_MIGRATION_MARKER = ".couriercraft-legacy-migration-settled";
+    /**
+     * Review comment 52706: {@link #migrateServerConfig} runs before {@link CourierCraftMod}'s
+     * own {@code registerConfig} call -- but NOT before NeoForge's OWN normal config-loading
+     * lifecycle finishes for THIS process start. If migration fails, leaving {@link
+     * #NEW_SERVER_FILE} absent (correctly, per the atomic-publish fix), {@code registerConfig}
+     * runs moments later in that SAME constructor call and materializes a brand-new, perfectly
+     * valid, DEFAULT-valued {@code couriercraft-server.toml} anyway -- that is simply normal
+     * first-run mod config bootstrapping, nothing this class can or should prevent. The old
+     * "does the target file exist" check (reused across both the global migration and that
+     * default-creation case) could therefore not tell "genuinely already migrated" apart from
+     * "FML created a defaults file after a failed attempt" -- the next launch would see that
+     * defaults file, mistake it for a completed migration, and permanently lose the legacy
+     * values. A dedicated marker -- exactly like the per-world one above, and for the identical
+     * reason -- is the only reliable completion signal; target file existence no longer gates
+     * anything.
+     */
+    static final String GLOBAL_SERVER_MIGRATION_MARKER = ".couriercraft-legacy-server-migration-settled";
+    /** Same reasoning as {@link #GLOBAL_SERVER_MIGRATION_MARKER}, for {@link #migrateClientConfig}. */
+    static final String GLOBAL_CLIENT_MIGRATION_MARKER = ".couriercraft-legacy-client-migration-settled";
 
     private LegacyConfigMigration() {}
 
@@ -71,9 +95,36 @@ public final class LegacyConfigMigration {
      * The server spec's keys are byte-for-byte identical pre- and post-split (same names, same
      * comments, same bounds -- unchanged from the pre-split {@code DispatcherOfferConfig}), so
      * copying the legacy file's bytes wholesale is a complete, lossless migration.
+     *
+     * <p>Settles (writes {@link #GLOBAL_SERVER_MIGRATION_MARKER}) only when there is genuinely
+     * nothing to migrate, or once the copy durably succeeds -- never merely because {@link
+     * #NEW_SERVER_FILE} already exists (see that marker's own javadoc for why target-file
+     * existence stopped being a safe signal). A failed copy leaves the marker absent so the next
+     * launch retries -- deliberately overwriting whatever NeoForge's own normal config loading
+     * may have materialized there in the meantime.
      */
     public static void migrateServerConfig(Path configDir) {
-        copyFileIfNeeded(configDir.resolve(LEGACY_SERVER_FILE), configDir.resolve(NEW_SERVER_FILE));
+        Path marker = configDir.resolve(GLOBAL_SERVER_MIGRATION_MARKER);
+        if (Files.exists(marker)) {
+            return;
+        }
+        Path legacy = configDir.resolve(LEGACY_SERVER_FILE);
+        if (!Files.exists(legacy)) {
+            settleGlobalMigration(marker);
+            return;
+        }
+        if (copyFileAtomically(legacy, configDir.resolve(NEW_SERVER_FILE))) {
+            settleGlobalMigration(marker);
+        }
+    }
+
+    private static void settleGlobalMigration(Path marker) {
+        try {
+            Files.createDirectories(marker.getParent());
+            Files.createFile(marker);
+        } catch (IOException e) {
+            LOGGER.warn("Could not write global Dispatcher config migration marker at {}", marker, e);
+        }
     }
 
     /**
@@ -256,20 +307,29 @@ public final class LegacyConfigMigration {
      * a root {@code showLegacyContractHud} key (Courier Craft has no other client setting to nest
      * it against) -- the only key migrated; every other setting in the legacy client file still
      * belongs to Dynamic Vehicles' own (untouched) remaining settings and must not be copied.
+     *
+     * <p>Settles (writes {@link #GLOBAL_CLIENT_MIGRATION_MARKER}) only when there is genuinely
+     * nothing to migrate, or once publication durably succeeds -- see {@link
+     * #GLOBAL_SERVER_MIGRATION_MARKER}'s javadoc for why {@link #NEW_CLIENT_FILE} existing is no
+     * longer a safe completion signal on its own.
      */
     public static void migrateClientConfig(Path configDir) {
+        Path marker = configDir.resolve(GLOBAL_CLIENT_MIGRATION_MARKER);
+        if (Files.exists(marker)) {
+            return;
+        }
         Path legacy = configDir.resolve(LEGACY_CLIENT_FILE);
-        Path target = configDir.resolve(NEW_CLIENT_FILE);
-        if (Files.exists(target) || !Files.exists(legacy)) {
+        if (!Files.exists(legacy)) {
+            settleGlobalMigration(marker);
             return;
         }
         try (FileConfig legacyConfig = FileConfig.of(legacy)) {
             legacyConfig.load();
             if (!legacyConfig.contains(LEGACY_CLIENT_KEY)) {
+                settleGlobalMigration(marker);
                 return;
             }
             boolean legacyValue = legacyConfig.get(LEGACY_CLIENT_KEY);
-            Files.createDirectories(target.getParent());
             // Deliberately NOT FileConfig.of(target).set(...).save(): confirmed (standalone JVM
             // reproduction, since this sourceSet can't run NeoForge) that in night-config 3.8.3, a
             // FileConfig backed by a file that doesn't exist yet silently fails to flush its first
@@ -280,13 +340,13 @@ public final class LegacyConfigMigration {
             fresh.set(NEW_CLIENT_KEY, legacyValue);
             // Published atomically (review comment 52663, the same class of defect already fixed
             // for the per-world path at 52646): a direct write to the real target can leave an
-            // empty/truncated file on a disk-full or short write, which the "target already
-            // exists" check above would then mistake for an already-migrated file forever,
-            // silently losing the legacy value with no retry.
-            publishAtomically(fresh, target);
+            // empty/truncated file on a disk-full or short write.
+            publishAtomically(fresh, configDir.resolve(NEW_CLIENT_FILE));
+            settleGlobalMigration(marker);
         } catch (Exception e) {
             LOGGER.warn(
-                    "Could not migrate legacy Dispatcher client config from {}; falling back to defaults", legacy, e);
+                    "Could not migrate legacy Dispatcher client config from {}; will retry on the next launch", legacy, e);
+            // marker stays absent -- retry on the next launch (review comment 52706)
         }
     }
 
@@ -294,21 +354,22 @@ public final class LegacyConfigMigration {
      * Copies the legacy server config file wholesale via a sibling temp file plus an atomic move
      * (review comment 52663), for the same reason {@link #publishAtomically} exists: a direct
      * {@code Files.copy} straight to {@code target} can leave a truncated file behind on a
-     * disk-full or short write, which the "target already exists" check above would then mistake
-     * for an already-migrated file forever, silently losing the legacy values with no retry.
+     * disk-full or short write.
+     *
+     * @return true if the copy durably succeeded (the caller may now settle); false if it failed
+     *     (the caller must NOT settle -- review comment 52706)
      */
-    private static void copyFileIfNeeded(Path legacy, Path target) {
-        if (Files.exists(target) || !Files.exists(legacy)) {
-            return;
-        }
+    private static boolean copyFileAtomically(Path legacy, Path target) {
         Path tmp = target.resolveSibling(target.getFileName() + ".tmp-" + java.util.UUID.randomUUID());
         try {
             Files.createDirectories(target.getParent());
             Files.copy(legacy, tmp);
             Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            return true;
         } catch (IOException e) {
             LOGGER.warn(
-                    "Could not migrate legacy Dispatcher server config from {}; falling back to defaults", legacy, e);
+                    "Could not migrate legacy Dispatcher server config from {}; will retry on the next launch", legacy, e);
+            return false;
         } finally {
             try {
                 Files.deleteIfExists(tmp);
