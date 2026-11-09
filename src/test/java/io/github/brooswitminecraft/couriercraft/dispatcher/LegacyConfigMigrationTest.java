@@ -139,12 +139,30 @@ class LegacyConfigMigrationTest {
 
         Optional<Path> firstCall = LegacyConfigMigration.decidePerWorldLegacyFile(worldDir);
         assertTrue(firstCall.isPresent());
+        // Simulates the caller settling only after the migration actually durably succeeded
+        // (review comment 52641) -- decidePerWorldLegacyFile alone never settles this case.
+        LegacyConfigMigration.settlePerWorldMigration(worldDir);
 
         // Simulate an admin changing their mind through Courier's own per-world config after the
         // first server start, then the server restarting: the legacy file is still sitting there
         // with its old value, but must never be re-applied and clobber the admin's later choice.
         Optional<Path> secondCall = LegacyConfigMigration.decidePerWorldLegacyFile(worldDir);
         assertTrue(secondCall.isEmpty(), "a world already settled on its first start must never be re-migrated");
+    }
+
+    @Test
+    void decidePerWorldLegacyFileDoesNotSettleWhenThereIsSomethingToMigrate(@TempDir Path worldsRoot) throws IOException {
+        Path worldDir = Files.createDirectory(worldsRoot.resolve("world"));
+        Files.writeString(worldDir.resolve(LegacyConfigMigration.LEGACY_SERVER_FILE), "noviceMaxRing = 3\n");
+
+        Optional<Path> decided = LegacyConfigMigration.decidePerWorldLegacyFile(worldDir);
+
+        assertTrue(decided.isPresent());
+        // Review comment 52641: committing the marker before the migration actually durably
+        // succeeds (read, converted, written) would permanently abandon this world's migration
+        // on a transient failure. Only the caller may settle it, and only after success.
+        assertFalse(Files.exists(worldDir.resolve(LegacyConfigMigration.PER_WORLD_MIGRATION_MARKER)),
+                "the marker must not be committed merely because there is something to migrate");
     }
 
     @Test

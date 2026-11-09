@@ -86,7 +86,17 @@ public final class LegacyConfigMigration {
     }
 
     static void migratePerWorldServerConfig(Path perWorldDir) {
-        decidePerWorldLegacyFile(perWorldDir).ifPresent(legacy -> applyPerWorldOverridesFrom(legacy, perWorldDir.resolve(NEW_SERVER_FILE)));
+        Optional<Path> legacy = decidePerWorldLegacyFile(perWorldDir);
+        if (legacy.isEmpty()) {
+            return;
+        }
+        // Settle ONLY after a durable success (review comment 52641): committing the marker
+        // before the file is actually read/converted/written would permanently abandon this
+        // world's migration on a transient read/write/validation failure -- the marker's absence
+        // is exactly what makes the next server start retry.
+        if (applyPerWorldOverridesFrom(legacy.get(), perWorldDir.resolve(NEW_SERVER_FILE))) {
+            settlePerWorldMigration(perWorldDir);
+        }
     }
 
     /**
@@ -96,11 +106,14 @@ public final class LegacyConfigMigration {
      * LegacyConfigMigrationTest}) against multiple distinct per-world directories at once,
      * proving no cross-world contamination.
      *
-     * <p>Settles permanently on the FIRST call for a given world (writes {@link
-     * #PER_WORLD_MIGRATION_MARKER}), exactly like {@link #migrateServerConfig}'s own global
-     * one-time semantics -- so a later admin edit made directly through this world's own {@code
-     * couriercraft-server.toml} is never subsequently clobbered by a stale legacy value on a
-     * later server restart.
+     * <p>Does NOT settle (write {@link #PER_WORLD_MIGRATION_MARKER}) when there is something to
+     * migrate -- that is the caller's responsibility, and only after a durable success (review
+     * comment 52641; see {@link #migratePerWorldServerConfig(Path)}). When there is genuinely
+     * nothing to migrate (no legacy file, or a per-world Courier file already exists), there is
+     * nothing to retry, so this settles immediately: exactly like {@link #migrateServerConfig}'s
+     * own global one-time semantics, so a later admin edit made directly through this world's own
+     * {@code couriercraft-server.toml} is never subsequently clobbered by a stale legacy value on
+     * a later server restart.
      *
      * <p><b>Coexistence/precedence (review comment 52630, finding 1):</b> since NeoForge's own
      * per-world override is opt-in (it is used only if it ALREADY exists when the world's config
@@ -118,32 +131,40 @@ public final class LegacyConfigMigration {
             return Optional.empty();
         }
         Path legacy = perWorldDir.resolve(LEGACY_SERVER_FILE);
-        Optional<Path> result = Optional.empty();
         if (Files.exists(legacy) && !Files.exists(perWorldDir.resolve(NEW_SERVER_FILE))) {
-            result = Optional.of(legacy);
+            return Optional.of(legacy);
         }
+        settlePerWorldMigration(perWorldDir);
+        return Optional.empty();
+    }
+
+    static void settlePerWorldMigration(Path perWorldDir) {
+        Path marker = perWorldDir.resolve(PER_WORLD_MIGRATION_MARKER);
         try {
             Files.createDirectories(perWorldDir);
             Files.createFile(marker);
         } catch (IOException e) {
             CourierCraftMod.LOGGER.warn("Could not write per-world Dispatcher config migration marker at {}", marker, e);
         }
-        return result;
     }
 
     /**
-     * Converts and validates each legacy entry exactly as {@link #applyPerWorldOverridesFrom}
-     * does, then writes a per-world {@code couriercraft-server.toml} containing only the
-     * successfully-converted keys directly (bypassing {@code ConfigValue#save}, which would
-     * target the wrong file at this point -- see this class's {@code
-     * #onServerAboutToStart} javadoc) -- NeoForge's own {@code ModConfigSpec#correct} fills in any
-     * key this doesn't cover from the schema's defaults the next time this exact file is actually
-     * loaded as a real per-world override, the same way a hand-written partial override file
-     * would behave. ALSO applies each converted value to the live cache via {@code ConfigValue#set}
-     * (never {@code #save}) so this session's behavior is correct immediately, without waiting for
-     * a restart to pick up the newly-written file.
+     * Converts and validates each legacy entry, then writes a per-world {@code
+     * couriercraft-server.toml} containing only the successfully-converted keys directly
+     * (bypassing {@code ConfigValue#save}, which would target the wrong file at this point -- see
+     * {@link #onServerAboutToStart}'s javadoc) -- NeoForge's own {@code ModConfigSpec#correct}
+     * fills in any key this doesn't cover from the schema's defaults the next time this exact
+     * file is actually loaded as a real per-world override, the same way a hand-written partial
+     * override file would behave. ALSO applies each converted value to the live cache via {@code
+     * ConfigValue#set} (never {@code #save}) so this session's behavior is correct immediately,
+     * without waiting for a restart to pick up the newly-written file.
+     *
+     * @return true if the legacy file was durably read and (if it held any valid values) written,
+     *     meaning the caller may now settle; false if reading the legacy file or writing the new
+     *     per-world file failed, meaning the caller must NOT settle -- the next server start must
+     *     retry from scratch (review comment 52641)
      */
-    private static void applyPerWorldOverridesFrom(Path legacyFile, Path perWorldCourierFile) {
+    private static boolean applyPerWorldOverridesFrom(Path legacyFile, Path perWorldCourierFile) {
         try (FileConfig legacyConfig = FileConfig.of(legacyFile)) {
             legacyConfig.load();
             Config fresh = TomlFormat.newConfig();
@@ -184,10 +205,12 @@ public final class LegacyConfigMigration {
                     TomlFormat.instance().createWriter().write(fresh, out);
                 }
             }
+            return true;
         } catch (Exception e) {
             CourierCraftMod.LOGGER.warn(
-                    "Could not read legacy per-world Dispatcher server config from {}; this world keeps its current/default settings",
+                    "Could not read legacy per-world Dispatcher server config from {}; will retry on the next server start",
                     legacyFile, e);
+            return false;
         }
     }
 

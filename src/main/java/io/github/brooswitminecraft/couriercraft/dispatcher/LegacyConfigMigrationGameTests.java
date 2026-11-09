@@ -141,4 +141,57 @@ public final class LegacyConfigMigrationGameTests {
             }
         }
     }
+
+    @GameTest(templateNamespace = "dynamicvehicles", template = "dispatch_profession",
+            batch = "perWorldMigrationRetriesAfterATransientFailure")
+    public static void perWorldMigrationRetriesAfterATransientFailure(GameTestHelper helper) {
+        MinecraftServer server = helper.getLevel().getServer();
+        Path perWorldDir = server.getWorldPath(new LevelResource("serverconfig"));
+        Path legacy = perWorldDir.resolve(LegacyConfigMigration.LEGACY_SERVER_FILE);
+        Path perWorldCourier = perWorldDir.resolve(LegacyConfigMigration.NEW_SERVER_FILE);
+        Path marker = perWorldDir.resolve(LegacyConfigMigration.PER_WORLD_MIGRATION_MARKER);
+        int originalMaxRing = DispatcherOfferConfig.NOVICE_MAX_RING.get();
+        int migratedValue = originalMaxRing == 17 ? 23 : 17;
+
+        try {
+            Files.createDirectories(perWorldDir);
+            Files.deleteIfExists(marker);
+            Files.deleteIfExists(perWorldCourier);
+            // Malformed TOML forces a real read failure inside the migration -- review comment
+            // 52641's exact concern: a transient failure mid-migration must not permanently
+            // abandon this world's migration by settling the marker anyway.
+            Files.writeString(legacy, "noviceMaxRing = [unterminated\n");
+
+            LegacyConfigMigration.migratePerWorldServerConfig(server);
+
+            helper.assertTrue(!Files.exists(marker),
+                    "a failed migration attempt must not settle -- it must remain retryable on the next server start");
+            helper.assertTrue(!Files.exists(perWorldCourier),
+                    "a failed attempt must not leave behind a partially-written per-world file either");
+            helper.assertTrue(DispatcherOfferConfig.NOVICE_MAX_RING.get() == originalMaxRing,
+                    "a failed attempt must not have mutated the live config either");
+
+            // Simulate the next server start on the same world: the legacy file is now fixed.
+            Files.writeString(legacy, "noviceMaxRing = " + migratedValue + "\n");
+            LegacyConfigMigration.migratePerWorldServerConfig(server);
+
+            helper.assertTrue(DispatcherOfferConfig.NOVICE_MAX_RING.get() == migratedValue,
+                    "a retried migration after the legacy file is fixed must succeed and apply");
+            helper.assertTrue(Files.exists(marker), "a successful retry must settle");
+            helper.assertTrue(Files.exists(perWorldCourier), "a successful retry must write the per-world file");
+
+            helper.succeed();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        } finally {
+            DispatcherOfferConfig.NOVICE_MAX_RING.set(originalMaxRing);
+            try {
+                Files.deleteIfExists(legacy);
+                Files.deleteIfExists(perWorldCourier);
+                Files.deleteIfExists(marker);
+            } catch (IOException ignored) {
+                // best-effort cleanup only
+            }
+        }
+    }
 }
