@@ -264,25 +264,43 @@ public final class LegacyConfigMigration {
             // writer directly has no such issue.
             Config fresh = TomlFormat.newConfig();
             fresh.set(NEW_CLIENT_KEY, legacyValue);
-            try (OutputStream out = Files.newOutputStream(target)) {
-                TomlFormat.instance().createWriter().write(fresh, out);
-            }
+            // Published atomically (review comment 52663, the same class of defect already fixed
+            // for the per-world path at 52646): a direct write to the real target can leave an
+            // empty/truncated file on a disk-full or short write, which the "target already
+            // exists" check above would then mistake for an already-migrated file forever,
+            // silently losing the legacy value with no retry.
+            publishAtomically(fresh, target);
         } catch (Exception e) {
             CourierCraftMod.LOGGER.warn(
                     "Could not migrate legacy Dispatcher client config from {}; falling back to defaults", legacy, e);
         }
     }
 
+    /**
+     * Copies the legacy server config file wholesale via a sibling temp file plus an atomic move
+     * (review comment 52663), for the same reason {@link #publishAtomically} exists: a direct
+     * {@code Files.copy} straight to {@code target} can leave a truncated file behind on a
+     * disk-full or short write, which the "target already exists" check above would then mistake
+     * for an already-migrated file forever, silently losing the legacy values with no retry.
+     */
     private static void copyFileIfNeeded(Path legacy, Path target) {
         if (Files.exists(target) || !Files.exists(legacy)) {
             return;
         }
+        Path tmp = target.resolveSibling(target.getFileName() + ".tmp-" + java.util.UUID.randomUUID());
         try {
             Files.createDirectories(target.getParent());
-            Files.copy(legacy, target);
+            Files.copy(legacy, tmp);
+            Files.move(tmp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException e) {
             CourierCraftMod.LOGGER.warn(
                     "Could not migrate legacy Dispatcher server config from {}; falling back to defaults", legacy, e);
+        } finally {
+            try {
+                Files.deleteIfExists(tmp);
+            } catch (IOException ignored) {
+                // best-effort cleanup only
+            }
         }
     }
 }

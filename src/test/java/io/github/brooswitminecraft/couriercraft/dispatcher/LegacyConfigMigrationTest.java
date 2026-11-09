@@ -87,6 +87,62 @@ class LegacyConfigMigrationTest {
                 "a legacy file that never set this key has nothing to migrate");
     }
 
+    // Atomic global publication (review comment 52663): the same partial-write defect already
+    // fixed for the per-world path (52646) also applied to both global migration paths -- a
+    // direct write/copy to the real target could leave a truncated file behind on a disk-full or
+    // short write, which the "target already exists" check would then mistake for an
+    // already-migrated file forever, silently losing the legacy values with no retry.
+
+    @Test
+    void serverConfigRetriesAfterATargetWriteFailure(@TempDir Path configDir) throws IOException {
+        Files.writeString(configDir.resolve(LegacyConfigMigration.LEGACY_SERVER_FILE), "noviceMaxRing = 7\n");
+        Path target = configDir.resolve(LegacyConfigMigration.NEW_SERVER_FILE);
+
+        boolean madeReadOnly = configDir.toFile().setWritable(false);
+        assertTrue(madeReadOnly, "test setup: must be able to make the config directory read-only on this platform");
+        try {
+            LegacyConfigMigration.migrateServerConfig(configDir);
+            assertFalse(Files.exists(target), "a failed publish must leave no final file behind, partial or otherwise");
+        } finally {
+            configDir.toFile().setWritable(true);
+        }
+
+        // Simulate a later restart with the directory writable again.
+        LegacyConfigMigration.migrateServerConfig(configDir);
+
+        assertTrue(Files.exists(target), "a retry once writable again must succeed");
+        try (FileConfig config = FileConfig.of(target)) {
+            config.load();
+            assertEquals(7, config.getInt("noviceMaxRing"), "the retried migration must still carry the original legacy value");
+        }
+    }
+
+    @Test
+    void clientConfigRetriesAfterATargetWriteFailure(@TempDir Path configDir) throws IOException {
+        Files.writeString(configDir.resolve(LegacyConfigMigration.LEGACY_CLIENT_FILE),
+                "[delivery]\nshowLegacyContractHud = true\n");
+        Path target = configDir.resolve(LegacyConfigMigration.NEW_CLIENT_FILE);
+
+        boolean madeReadOnly = configDir.toFile().setWritable(false);
+        assertTrue(madeReadOnly, "test setup: must be able to make the config directory read-only on this platform");
+        try {
+            LegacyConfigMigration.migrateClientConfig(configDir);
+            assertFalse(Files.exists(target), "a failed publish must leave no final file behind, partial or otherwise");
+        } finally {
+            configDir.toFile().setWritable(true);
+        }
+
+        // Simulate a later restart with the directory writable again.
+        LegacyConfigMigration.migrateClientConfig(configDir);
+
+        assertTrue(Files.exists(target), "a retry once writable again must succeed");
+        try (FileConfig config = FileConfig.of(target)) {
+            config.load();
+            assertEquals(true, (boolean) config.get(LegacyConfigMigration.NEW_CLIENT_KEY),
+                    "the retried migration must still carry the original legacy value");
+        }
+    }
+
     // Per-world serverconfig migration (review comment 52602/52604/52630): the decision core
     // (decidePerWorldLegacyFile) is Minecraft-free and directly testable here; the NeoForge-
     // dependent conversion/validation/application onto the live ConfigValue/MinecraftServer is
