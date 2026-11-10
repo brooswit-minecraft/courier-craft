@@ -266,4 +266,127 @@ public final class LegacyConfigMigrationGameTests {
             }
         }
     }
+
+    // Global migration precedence (review comment 52711, following on from 52706):
+    // migrateServerConfig/migrateClientConfig now distinguish a genuine pre-existing admin
+    // customization of the global config from a target that merely LOOKS like it exists because
+    // NeoForge's own normal bootstrap created it with pure schema defaults after a prior failed
+    // attempt -- by comparing every field's current value against that field's own schema
+    // default via the real ConfigValue/ModConfigSpec machinery, which is exactly why this needs a
+    // GameTest rather than plain JUnit. These use an ISOLATED temp directory (never the real
+    // FMLPaths.CONFIGDIR.get()), so they never touch this run's actual shared global config.
+
+    @GameTest(templateNamespace = "dynamicvehicles", template = "dispatch_profession",
+            batch = "globalServerConfigPreservesAGenuinePreExistingCustomization")
+    public static void globalServerConfigPreservesAGenuinePreExistingCustomization(GameTestHelper helper) {
+        withIsolatedConfigDir(helper, configDir -> {
+            Files.writeString(configDir.resolve(LegacyConfigMigration.LEGACY_SERVER_FILE), "noviceMaxRing = 7\n");
+            // Genuinely customized: 42 is not noviceMaxRing's schema default (1).
+            Path target = configDir.resolve(LegacyConfigMigration.NEW_SERVER_FILE);
+            Files.writeString(target, "noviceMaxRing = 42\n");
+
+            LegacyConfigMigration.migrateServerConfig(configDir);
+
+            try (FileConfig config = FileConfig.of(target)) {
+                config.load();
+                helper.assertTrue(config.getInt("noviceMaxRing") == 42,
+                        "a genuine pre-existing customization must never be overwritten by a legacy value");
+            }
+        });
+    }
+
+    @GameTest(templateNamespace = "dynamicvehicles", template = "dispatch_profession",
+            batch = "globalServerConfigOverwritesATargetIndistinguishableFromDefaults")
+    public static void globalServerConfigOverwritesATargetIndistinguishableFromDefaults(GameTestHelper helper) {
+        withIsolatedConfigDir(helper, configDir -> {
+            Files.writeString(configDir.resolve(LegacyConfigMigration.LEGACY_SERVER_FILE), "noviceMaxRing = 7\n");
+            // Exactly noviceMaxRing's own schema default (1) -- indistinguishable from a file
+            // NeoForge's own bootstrap would have created after a prior failed migration attempt.
+            Path target = configDir.resolve(LegacyConfigMigration.NEW_SERVER_FILE);
+            Files.writeString(target, "noviceMaxRing = 1\n");
+
+            LegacyConfigMigration.migrateServerConfig(configDir);
+
+            try (FileConfig config = FileConfig.of(target)) {
+                config.load();
+                helper.assertTrue(config.getInt("noviceMaxRing") == 7,
+                        "a target indistinguishable from pure schema defaults must be treated as retry-eligible, not a customization");
+            }
+        });
+    }
+
+    @GameTest(templateNamespace = "dynamicvehicles", template = "dispatch_profession",
+            batch = "globalClientConfigPreservesAGenuinePreExistingCustomization")
+    public static void globalClientConfigPreservesAGenuinePreExistingCustomization(GameTestHelper helper) {
+        withIsolatedConfigDir(helper, configDir -> {
+            Files.writeString(configDir.resolve(LegacyConfigMigration.LEGACY_CLIENT_FILE),
+                    "[delivery]\nshowLegacyContractHud = true\n");
+            // Genuinely customized: true is not showLegacyContractHud's schema default (false).
+            Path target = configDir.resolve(LegacyConfigMigration.NEW_CLIENT_FILE);
+            Files.writeString(target, "showLegacyContractHud = true\n");
+
+            LegacyConfigMigration.migrateClientConfig(configDir);
+
+            try (FileConfig config = FileConfig.of(target)) {
+                config.load();
+                helper.assertTrue((boolean) config.get(LegacyConfigMigration.NEW_CLIENT_KEY),
+                        "a genuine pre-existing customization must never be overwritten by a legacy value");
+            }
+        });
+    }
+
+    @GameTest(templateNamespace = "dynamicvehicles", template = "dispatch_profession",
+            batch = "globalClientConfigOverwritesATargetIndistinguishableFromDefaults")
+    public static void globalClientConfigOverwritesATargetIndistinguishableFromDefaults(GameTestHelper helper) {
+        withIsolatedConfigDir(helper, configDir -> {
+            Files.writeString(configDir.resolve(LegacyConfigMigration.LEGACY_CLIENT_FILE),
+                    "[delivery]\nshowLegacyContractHud = true\n");
+            // Exactly showLegacyContractHud's own schema default (false) -- indistinguishable
+            // from a file NeoForge's own bootstrap would have created after a prior failure.
+            Path target = configDir.resolve(LegacyConfigMigration.NEW_CLIENT_FILE);
+            Files.writeString(target, "showLegacyContractHud = false\n");
+
+            LegacyConfigMigration.migrateClientConfig(configDir);
+
+            try (FileConfig config = FileConfig.of(target)) {
+                config.load();
+                helper.assertTrue((boolean) config.get(LegacyConfigMigration.NEW_CLIENT_KEY),
+                        "a target indistinguishable from pure schema defaults must be treated as retry-eligible, not a customization");
+            }
+        });
+    }
+
+    private interface IsolatedConfigDirTest {
+        void run(Path configDir) throws IOException;
+    }
+
+    /** Runs {@code test} against a fresh, isolated temp directory (never the real {@code
+     * FMLPaths.CONFIGDIR.get()}), so these global-config precedence tests never touch this run's
+     * actual shared config files, then deletes it afterward regardless of outcome. */
+    private static void withIsolatedConfigDir(GameTestHelper helper, IsolatedConfigDirTest test) {
+        Path configDir;
+        try {
+            configDir = Files.createTempDirectory("courier-craft-global-config-test");
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        try {
+            test.run(configDir);
+            helper.succeed();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        } finally {
+            try (var walk = Files.walk(configDir)) {
+                walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
+                    try {
+                        Files.deleteIfExists(p);
+                    } catch (IOException ignored) {
+                        // best-effort cleanup only
+                    }
+                });
+            } catch (IOException ignored) {
+                // best-effort cleanup only
+            }
+        }
+    }
 }

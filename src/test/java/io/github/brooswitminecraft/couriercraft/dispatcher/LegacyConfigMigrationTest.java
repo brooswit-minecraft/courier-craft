@@ -47,8 +47,10 @@ class LegacyConfigMigrationTest {
     @Test
     void serverConfigNeverOverwritesAnAlreadySettledMigration(@TempDir Path configDir) throws IOException {
         // Settling is what "already migrated" actually means now (review comment 52706) -- the
-        // target file merely existing is deliberately NOT enough; see
-        // serverConfigRetriesEvenAfterNormalConfigLoadingCreatedADefaultFile below for why.
+        // target file merely existing is deliberately NOT enough. See
+        // LegacyConfigMigrationGameTests for the failure -> default-creation -> restart -> retry
+        // and genuine-pre-existing-customization-preserved cases, both of which need the real
+        // ConfigValue/ModConfigSpec machinery this plain JUnit sourceSet doesn't have.
         Files.writeString(configDir.resolve(LegacyConfigMigration.LEGACY_SERVER_FILE), "noviceMaxRing = 7\n");
         Path alreadyMigrated = configDir.resolve(LegacyConfigMigration.NEW_SERVER_FILE);
         Files.writeString(alreadyMigrated, "noviceMaxRing = 99\n");
@@ -59,71 +61,6 @@ class LegacyConfigMigrationTest {
         try (FileConfig config = FileConfig.of(alreadyMigrated)) {
             config.load();
             assertEquals(99, config.getInt("noviceMaxRing"), "a settled migration must not clobber the admin's own later edits");
-        }
-    }
-
-    // Failure -> normal-config-default-creation -> restart -> retry (review comment 52706): a
-    // failed migration leaves the target absent (per the atomic-publish fix), but
-    // CourierCraftMod's own registerConfig call runs moments later in that SAME constructor,
-    // regardless of whether migration succeeded -- and NeoForge's normal config bootstrapping
-    // then materializes a brand-new, perfectly valid, DEFAULT-valued target file simply because
-    // none existed yet. The marker -- not the target file's existence -- is what must gate retry,
-    // or the next launch mistakes that defaults file for a completed migration and permanently
-    // loses the legacy values.
-
-    @Test
-    void serverConfigRetriesEvenAfterNormalConfigLoadingCreatedADefaultFile(@TempDir Path configDir) throws IOException {
-        Files.writeString(configDir.resolve(LegacyConfigMigration.LEGACY_SERVER_FILE), "noviceMaxRing = 7\n");
-        Path target = configDir.resolve(LegacyConfigMigration.NEW_SERVER_FILE);
-
-        boolean madeReadOnly = configDir.toFile().setWritable(false);
-        assertTrue(madeReadOnly, "test setup: must be able to make the config directory read-only on this platform");
-        try {
-            LegacyConfigMigration.migrateServerConfig(configDir);
-        } finally {
-            configDir.toFile().setWritable(true);
-        }
-        assertFalse(Files.exists(target), "sanity check: a failed attempt must still leave no final file");
-
-        // Simulate NeoForge's own normal config-loading bootstrap, which runs regardless of
-        // whether migration succeeded, materializing a default-valued file where none existed.
-        Files.writeString(target, "noviceMaxRing = 1\n");
-
-        // Simulate the next launch.
-        LegacyConfigMigration.migrateServerConfig(configDir);
-
-        try (FileConfig config = FileConfig.of(target)) {
-            config.load();
-            assertEquals(7, config.getInt("noviceMaxRing"),
-                    "a retry must overwrite a stale default file left behind by a prior failed attempt, not mistake it for a completed migration");
-        }
-    }
-
-    @Test
-    void clientConfigRetriesEvenAfterNormalConfigLoadingCreatedADefaultFile(@TempDir Path configDir) throws IOException {
-        Files.writeString(configDir.resolve(LegacyConfigMigration.LEGACY_CLIENT_FILE),
-                "[delivery]\nshowLegacyContractHud = true\n");
-        Path target = configDir.resolve(LegacyConfigMigration.NEW_CLIENT_FILE);
-
-        boolean madeReadOnly = configDir.toFile().setWritable(false);
-        assertTrue(madeReadOnly, "test setup: must be able to make the config directory read-only on this platform");
-        try {
-            LegacyConfigMigration.migrateClientConfig(configDir);
-        } finally {
-            configDir.toFile().setWritable(true);
-        }
-        assertFalse(Files.exists(target), "sanity check: a failed attempt must still leave no final file");
-
-        // Simulate NeoForge's own normal config-loading bootstrap creating a default-valued file.
-        Files.writeString(target, "showLegacyContractHud = false\n");
-
-        // Simulate the next launch.
-        LegacyConfigMigration.migrateClientConfig(configDir);
-
-        try (FileConfig config = FileConfig.of(target)) {
-            config.load();
-            assertEquals(true, (boolean) config.get(LegacyConfigMigration.NEW_CLIENT_KEY),
-                    "a retry must overwrite a stale default file left behind by a prior failed attempt, not mistake it for a completed migration");
         }
     }
 

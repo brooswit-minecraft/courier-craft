@@ -113,8 +113,59 @@ public final class LegacyConfigMigration {
             settleGlobalMigration(marker);
             return;
         }
-        if (copyFileAtomically(legacy, configDir.resolve(NEW_SERVER_FILE))) {
+        Path target = configDir.resolve(NEW_SERVER_FILE);
+        // Short-circuits on Files.exists(target): deliberately never even calls
+        // serverTargetLooksCustomized (which touches DispatcherOfferConfig/ModConfigSpec) when
+        // target doesn't exist yet, so this stays safe to call from the plain JUnit test
+        // sourceSet for every case that never pre-populates a target file.
+        if (Files.exists(target) && serverTargetLooksCustomized(target)) {
+            // A genuine pre-existing admin customization (review comment 52711) -- never
+            // overwrite it with a legacy value. Nothing left to retry either way, so settle.
             settleGlobalMigration(marker);
+            return;
+        }
+        if (copyFileAtomically(legacy, target)) {
+            settleGlobalMigration(marker);
+        }
+    }
+
+    /**
+     * Distinguishes a genuine pre-existing admin customization of {@link #NEW_SERVER_FILE} from a
+     * target that merely LOOKS like it exists because NeoForge's own normal config bootstrap
+     * created it with pure schema defaults after a prior failed migration attempt (review comment
+     * 52711, following on from 52706): every field's CURRENT value, read the same way NeoForge
+     * itself would ({@code ConfigValue#getRaw}), is compared against that same field's OWN
+     * schema default. If every field still matches its default, nothing has actually been
+     * customized -- safe to treat as retry-eligible and overwrite with the legacy value. Any
+     * field that differs means a real customization exists somewhere, and the whole file must be
+     * preserved untouched; a file that can't even be read is conservatively treated the same way.
+     *
+     * <p>This is the one and only place {@link #migrateServerConfig} touches NeoForge types --
+     * deliberately isolated and only ever reached when {@code Files.exists(target)}, so every
+     * existing plain-JUnit test that never pre-populates a target file is unaffected.
+     */
+    private static boolean serverTargetLooksCustomized(Path target) {
+        try (FileConfig targetConfig = FileConfig.of(target)) {
+            targetConfig.load();
+            for (Field field : DispatcherOfferConfig.class.getDeclaredFields()) {
+                if (!ModConfigSpec.ConfigValue.class.isAssignableFrom(field.getType())) {
+                    continue;
+                }
+                field.setAccessible(true);
+                @SuppressWarnings("unchecked")
+                ModConfigSpec.ConfigValue<Object> value = (ModConfigSpec.ConfigValue<Object>) field.get(null);
+                java.util.List<String> path = value.getPath();
+                Object actual = value.getRaw(targetConfig, path, value::getDefault);
+                if (!java.util.Objects.equals(actual, value.getDefault())) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (Exception e) {
+            LOGGER.warn(
+                    "Could not inspect existing global Dispatcher server config at {} for a prior customization; preserving it",
+                    target, e);
+            return true;
         }
     }
 
@@ -323,6 +374,13 @@ public final class LegacyConfigMigration {
             settleGlobalMigration(marker);
             return;
         }
+        Path target = configDir.resolve(NEW_CLIENT_FILE);
+        // Short-circuits on Files.exists(target) for the same reason migrateServerConfig's
+        // equivalent check does -- see serverTargetLooksCustomized's own javadoc.
+        if (Files.exists(target) && clientTargetLooksCustomized(target)) {
+            settleGlobalMigration(marker);
+            return;
+        }
         try (FileConfig legacyConfig = FileConfig.of(legacy)) {
             legacyConfig.load();
             if (!legacyConfig.contains(LEGACY_CLIENT_KEY)) {
@@ -341,12 +399,27 @@ public final class LegacyConfigMigration {
             // Published atomically (review comment 52663, the same class of defect already fixed
             // for the per-world path at 52646): a direct write to the real target can leave an
             // empty/truncated file on a disk-full or short write.
-            publishAtomically(fresh, configDir.resolve(NEW_CLIENT_FILE));
+            publishAtomically(fresh, target);
             settleGlobalMigration(marker);
         } catch (Exception e) {
             LOGGER.warn(
                     "Could not migrate legacy Dispatcher client config from {}; will retry on the next launch", legacy, e);
             // marker stays absent -- retry on the next launch (review comment 52706)
+        }
+    }
+
+    /** Same reasoning as {@link #serverTargetLooksCustomized}, for the client config's single key. */
+    private static boolean clientTargetLooksCustomized(Path target) {
+        try (FileConfig targetConfig = FileConfig.of(target)) {
+            targetConfig.load();
+            ModConfigSpec.ConfigValue<Boolean> value = DispatcherClientConfig.SHOW_LEGACY_CONTRACT_HUD;
+            Object actual = value.getRaw(targetConfig, value.getPath(), value::getDefault);
+            return !java.util.Objects.equals(actual, value.getDefault());
+        } catch (Exception e) {
+            LOGGER.warn(
+                    "Could not inspect existing global Dispatcher client config at {} for a prior customization; preserving it",
+                    target, e);
+            return true;
         }
     }
 
