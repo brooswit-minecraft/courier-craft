@@ -408,11 +408,24 @@ public final class LegacyConfigMigration {
         }
     }
 
-    /** Same reasoning as {@link #serverTargetLooksCustomized}, for the client config's single key. */
+    /**
+     * Same reasoning as {@link #serverTargetLooksCustomized}, for the client config's single key
+     * -- but reached via reflection ({@code getDeclaredField} + {@code .get(null)}), NEVER a
+     * direct {@code DispatcherClientConfig.SHOW_LEGACY_CONTRACT_HUD} field reference. Confirmed
+     * via a standalone JVM reproduction (minimal stub classes, no NeoForge involved) that a
+     * DIRECT static-field reference to a {@code ModConfigSpec.ConfigValue}-typed field -- even in
+     * a method that is never actually CALLED -- makes the whole class fail class-verification
+     * with {@code NoClassDefFoundError} the moment ANY method on it is touched from the plain
+     * JUnit test classpath; reflection-based access (the pattern {@link #serverTargetLooksCustomized}
+     * already used successfully) has no such eager resolution and is unaffected either way.
+     */
     private static boolean clientTargetLooksCustomized(Path target) {
         try (FileConfig targetConfig = FileConfig.of(target)) {
             targetConfig.load();
-            ModConfigSpec.ConfigValue<Boolean> value = DispatcherClientConfig.SHOW_LEGACY_CONTRACT_HUD;
+            Field field = DispatcherClientConfig.class.getDeclaredField("SHOW_LEGACY_CONTRACT_HUD");
+            field.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            ModConfigSpec.ConfigValue<Object> value = (ModConfigSpec.ConfigValue<Object>) field.get(null);
             Object actual = value.getRaw(targetConfig, value.getPath(), value::getDefault);
             return !java.util.Objects.equals(actual, value.getDefault());
         } catch (Exception e) {
