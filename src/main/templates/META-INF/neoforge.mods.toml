@@ -23,3 +23,26 @@ description='''Dispatcher-driven delivery contracts, extracted from Dynamic Vehi
     versionRange="${minecraft_version_range}"
     ordering="NONE"
     side="BOTH"
+
+# Optional, CLIENT only -- never required: this mod runs fully standalone without it. When
+# Dynamic Vehicles is ALSO installed, the Dispatcher HUD/waypoint overlay (dispatcher/
+# ContractWaypointOverlay) detects it at runtime and delegates to its real mission-waypoint
+# coexistence kernel instead of this mod's own standalone copy, so Dispatcher's and Pathfinder's
+# markers keep coordinating overlap avoidance exactly as before this mod existed -- MINECRAFT-493
+# review (comments 52304, 52318, 52320).
+#
+# versionRange below is advisory only, NOT the real compatibility gate: the real released 0.82.0+
+# (0.82.1 included) is pre-split and still registers the same "dynamicvehicles" Dispatcher/
+# Dispatch Board/menu/payload IDs this mod now also registers, which satisfies this range while
+# still being a genuinely incompatible pairing -- the real first post-split release's version
+# number isn't known until the external release-gate assigns it at merge time, so this range
+# cannot be tightened to express that. DynamicVehiclesCompatibility's runtime marker-class
+# handshake is the actual, version-independent gate (review comment 52567, finding 1) -- it fails
+# mod construction loudly and specifically if the installed build lacks the post-split marker,
+# rather than relying on this declared range.
+[[dependencies.${mod_id}]]
+    modId="dynamicvehicles"
+    type="optional"
+    versionRange="[0.82.0,)"
+    ordering="AFTER"
+    side="CLIENT"
