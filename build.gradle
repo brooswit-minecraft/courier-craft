@@ -41,7 +41,7 @@ tasks.register("downloadDynamicVehicles") {
     doLast {
         def target = dynamicVehiclesJar.get().asFile
         target.parentFile.mkdirs()
-        def url = "https://github.com/brooswit-minecraft/dynamic-vehicles/releases/download/v${dynamicVehiclesVersion}/dynamicvehicles-${dynamicVehiclesVersion}.jar"
+        def url = "https://github.com/brooswit-minecraft/legacy-dynamic-vehicles/releases/download/v${dynamicVehiclesVersion}/dynamicvehicles-${dynamicVehiclesVersion}.jar"
         new URL(url).withInputStream { input -> target.withOutputStream { it << input } }
         def digest = java.security.MessageDigest.getInstance("SHA-512")
         def actual = digest.digest(target.bytes).encodeHex().toString()
