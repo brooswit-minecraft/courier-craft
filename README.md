@@ -5,9 +5,10 @@ Dispatcher-driven delivery contracts, extracted from Dynamic Vehicles into their
 NeoForge 1.21.1, Java 21. Mod ID: `couriercraft`. MIT licensed.
 
 Ships the Dispatcher villager and delivery-contract gameplay, extracted from
-[Dynamic Vehicles](https://github.com/brooswit-minecraft/dynamic-vehicles)
-(MINECRAFT-493): the Dispatch Board job site, destination offers, delivery
-contracts, pillager ambushes, and the contract HUD/waypoint.
+[Legacy Dynamic Vehicles](https://github.com/brooswit-minecraft/legacy-dynamic-vehicles)
+(formerly Dynamic Vehicles) (MINECRAFT-493): the Dispatch Board job site,
+destination offers, delivery contracts, pillager ambushes, and the contract
+HUD/waypoint.
 
 ## Install / upgrade pairing
 
